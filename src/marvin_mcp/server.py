@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 from typing import Any
 
@@ -29,6 +30,10 @@ import httpx
 from fastmcp import FastMCP
 
 DEFAULT_API_URL = "https://app-api.marvin-labs.com"
+# What a 404 on every call means: the account has no access to the API yet.
+ACCESS_MESSAGE = (
+    "This is a private alpha version. Please email marvin@marvin-labs.com for access."
+)
 DEFAULT_WAIT_SECONDS = 50.0
 POLL_SECONDS = 3.0
 UNFINISHED = ("queued", "in_progress")
@@ -70,10 +75,7 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         except ValueError:
             detail = response.text[:300]
         if response.status_code == 404:
-            detail += (
-                " (a 404 on every call usually means your account has no access to the "
-                "Marvin API yet)"
-            )
+            detail += f" ({ACCESS_MESSAGE})"
         raise RuntimeError(f"Marvin API {response.status_code}: {detail}")
     return response.json()
 
@@ -193,5 +195,9 @@ async def get_conversation(
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["setup"]:
+        from marvin_mcp.setup import main as setup  # setup imports this module
+
+        sys.exit(setup(sys.argv[2:]))
     # stdio only; the banner would just be noise in the client's server log.
     mcp.run(show_banner=False)

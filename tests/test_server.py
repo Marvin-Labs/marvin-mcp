@@ -74,5 +74,5 @@ async def test_api_errors_carry_the_code_and_a_hint_for_404():
         )
     )
 
-    with pytest.raises(RuntimeError, match="404: not_found.*no access to the Marvin API"):
+    with pytest.raises(RuntimeError, match="404: not_found.*private alpha.*marvin@marvin-labs.com"):
         await server.ask_marvin("Hi")

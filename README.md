@@ -6,51 +6,41 @@ Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Co
 
 You need:
 
-1. **API access.** The Marvin API is in early access and has to be enabled for your account; until it is, every call returns 404.
+1. **Access.** This is a private alpha version. Please email marvin@marvin-labs.com for access.
 2. **An API key.** In the app: Account → API keys → Add new key.
 3. **uv** (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
-### Claude Code
+Then, from the project you want Marvin in, run:
 
 ```bash
-claude mcp add marvin \
-  --env MARVIN_API_KEY=ak_... \
+uvx --from git+https://github.com/Marvin-Labs/marvin-mcp marvin-mcp setup
+```
+
+It asks for your API key, checks that it works, and adds Marvin to the clients it finds. By default that is **this project only**:
+
+| Client | `setup` (this project) | `setup --global` (all projects) |
+|---|---|---|
+| Claude Code | yes, private to you (not in `.mcp.json`) | yes |
+| Codex, CLI and app | yes, in `.codex/config.toml`, kept out of git; Codex loads it once you trust the project | yes |
+| Claude Desktop | no per-project setting | yes |
+| ChatGPT desktop | no per-project setting | prints the values to paste into its settings |
+
+Run it again to change the key. `--yes` sets up every client found without asking; `MARVIN_API_KEY` in the environment skips the key prompt; `--api-url` points the clients at another environment, such as stg.
+
+### By hand
+
+Any MCP client that starts local (stdio) servers works. The command is `uvx`, the arguments are `--refresh --from git+https://github.com/Marvin-Labs/marvin-mcp marvin-mcp`, and `MARVIN_API_KEY` goes in the server's environment. For example:
+
+```bash
+claude mcp add marvin --env MARVIN_API_KEY=ak_... \
   -- uvx --refresh --from "git+https://github.com/Marvin-Labs/marvin-mcp" marvin-mcp
-```
-
-### Claude Desktop
-
-In `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "marvin": {
-      "command": "uvx",
-      "args": [
-        "--refresh",
-        "--from",
-        "git+https://github.com/Marvin-Labs/marvin-mcp",
-        "marvin-mcp"
-      ],
-      "env": { "MARVIN_API_KEY": "ak_..." }
-    }
-  }
-}
-```
-
-`--refresh` fetches the latest version each time your client starts the server. To stay on one version instead, drop it and pin a commit: `git+https://github.com/Marvin-Labs/marvin-mcp@<sha>`.
-
-### Codex
-
-```bash
 codex mcp add marvin --env MARVIN_API_KEY=ak_... \
   -- uvx --refresh --from "git+https://github.com/Marvin-Labs/marvin-mcp" marvin-mcp
 ```
 
-### Other clients
+Claude Desktop on macOS does not see your shell's PATH, so give it the full path to `uvx` (`which uvx`).
 
-Any MCP client that starts local (stdio) servers works: the command is `uvx`, the arguments are `--refresh --from git+https://github.com/Marvin-Labs/marvin-mcp marvin-mcp`, and `MARVIN_API_KEY` goes in the server's environment.
+`--refresh` fetches the latest version each time your client starts the server. To stay on one version instead, drop it and pin a commit: `git+https://github.com/Marvin-Labs/marvin-mcp@<sha>`.
 
 ## Tools
 
@@ -80,6 +70,14 @@ Every answer is a normal Marvin chat turn and uses your credits the same way.
 uv run pytest
 MARVIN_API_KEY=ak_... MARVIN_API_URL=http://localhost:<port> uv run marvin-mcp   # stdio
 ```
+
+To try a change in real clients before it is published, run setup from your checkout and pass `--source`, so the clients also start the server from it (add `--api-url` for stg or a local API):
+
+```bash
+uvx --from <checkout> marvin-mcp setup --source <checkout>
+```
+
+uv rebuilds the checkout whenever a file under `src/` changes (`[tool.uv] cache-keys` in `pyproject.toml`), so the next run and the next client restart pick up your edits. Run setup again without `--source` to switch back to the published version.
 
 This repository is published automatically from Marvin Labs' main codebase, where the client is maintained, and is replaced on every release. Changes made here are overwritten, so it does not take pull requests.
 

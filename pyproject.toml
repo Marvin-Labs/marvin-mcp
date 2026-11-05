@@ -9,6 +9,9 @@ requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=3.4,<4",
     "httpx>=0.28,<1",
+    "prompt-toolkit>=3.0.48,<4",
+    "rich>=13,<16",
+    "tomlkit>=0.13,<1",
 ]
 
 [project.urls]
@@ -30,3 +33,8 @@ packages = ["src/marvin_mcp"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.uv]
+# Rebuild a local checkout when the code changes, not only pyproject.toml, so
+# `uvx --from <checkout>` never runs a stale build while testing.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }]
