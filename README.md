@@ -51,8 +51,11 @@ Claude Desktop on macOS does not see your shell's PATH, so give it the full path
 | `cancel_response(response_id)` | Stops a running answer |
 | `list_conversations(limit?, cursor?)` | Your conversations, most recent first, including the app's |
 | `get_conversation(conversation_id, limit?, cursor?)` | A conversation's questions and answers |
+| `get_format_guide()` | How to show the table and chart blocks in answers |
 
 Answers often take a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for at most `MARVIN_WAIT_SECONDS` (default 50). If the answer isn't ready by then, the model calls `get_response` until it is.
+
+Answers can contain tables and charts, written as JSON in ```` ```financial-table ```` and ```` ```echarts ```` blocks that the Marvin app renders. `get_format_guide` explains how to turn the blocks into markdown tables, or into charts if the client can draw them.
 
 ## Configuration
 

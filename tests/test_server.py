@@ -67,12 +67,19 @@ async def test_an_answer_still_running_at_the_wait_cap_says_to_poll():
 
 
 @respx.mock
-async def test_api_errors_carry_the_code_and_a_hint_for_404():
-    respx.post(f"{API}/responses").mock(
-        return_value=httpx.Response(
-            404, json={"error": {"code": "not_found", "message": "Not Found"}}
-        )
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Not Found", r"404: not_found: Not Found \(This is a private alpha.*marvin@marvin-labs.com"),
+        ("Response not found", r"404: not_found: Response not found$"),
+    ],
+    ids=["access-gate", "missing-response"],
+)
+async def test_only_the_access_gate_404_carries_the_access_hint(message, expected):
+    respx.get(f"{API}/responses/resp_1").mock(
+        return_value=httpx.Response(404, json={"error": {"code": "not_found", "message": message}})
     )
 
-    with pytest.raises(RuntimeError, match="404: not_found.*private alpha.*marvin@marvin-labs.com"):
-        await server.ask_marvin("Hi")
+    with pytest.raises(RuntimeError, match=expected):
+        await server.get_response("resp_1")
+

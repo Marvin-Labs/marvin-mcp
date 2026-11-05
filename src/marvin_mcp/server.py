@@ -29,8 +29,10 @@ from typing import Any
 import httpx
 from fastmcp import FastMCP
 
+from marvin_mcp.formats import FORMAT_GUIDE
+
 DEFAULT_API_URL = "https://app-api.marvin-labs.com"
-# What a 404 on every call means: the account has no access to the API yet.
+# What the access gate's 404 means: the account has no access to the API yet.
 ACCESS_MESSAGE = (
     "This is a private alpha version. Please email marvin@marvin-labs.com for access."
 )
@@ -45,7 +47,9 @@ mcp = FastMCP(
         "companies, their filings, financials and markets. Answers can take several minutes: "
         "when ask_marvin returns status queued or in_progress, call get_response with the "
         "response_id until it is completed. To follow up in the same conversation, pass the "
-        "conversation_id from the previous answer."
+        "conversation_id from the previous answer. If an answer has ```financial-table or "
+        "```echarts blocks, call get_format_guide for an explanation of their format "
+        "conventions."
     ),
 )
 
@@ -69,12 +73,16 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     async with _client() as client:
         response = await client.request(method, path, **kwargs)
     if response.is_error:
+        message = None
         try:
             error = response.json().get("error", {})
-            detail = f"{error.get('code')}: {error.get('message')}"
+            message = error.get("message")
+            detail = f"{error.get('code')}: {message}"
         except ValueError:
             detail = response.text[:300]
-        if response.status_code == 404:
+        # The access gate answers every route with a bare "Not Found"; a missing
+        # response or conversation names what it could not find.
+        if response.status_code == 404 and message == "Not Found":
             detail += f" ({ACCESS_MESSAGE})"
         raise RuntimeError(f"Marvin API {response.status_code}: {detail}")
     return response.json()
@@ -138,7 +146,10 @@ async def cancel_response(response_id: str) -> dict[str, Any]:
     Args:
         response_id: The response_id ask_marvin returned.
     """
-    return _summary(await _request("POST", f"/responses/{response_id}/cancel"))
+    summary = _summary(await _request("POST", f"/responses/{response_id}/cancel"))
+    if summary["status"] in UNFINISHED:
+        summary["next_step"] = "Stopping. Call get_response to confirm it was cancelled."
+    return summary
 
 
 @mcp.tool
@@ -192,6 +203,17 @@ async def get_conversation(
         ],
         "next_cursor": items.get("next_cursor"),
     }
+
+
+@mcp.tool
+def get_format_guide() -> str:
+    """How to render the ```financial-table and ```echarts blocks in Marvin's answers.
+
+    Marvin writes tables and charts as JSON in fenced code blocks with those languages.
+    Call this once before showing such an answer to the user, to turn the blocks into
+    markdown tables (or charts, if you can draw them).
+    """
+    return FORMAT_GUIDE
 
 
 def main() -> None:
