@@ -1,6 +1,6 @@
 # Marvin MCP
 
-Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Code or any other MCP client. It runs locally over stdio and only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`) with your own API key. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
+Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Code or any other MCP client. It runs locally over stdio and only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`) with your own API key. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
 
 ## Setup
 
@@ -51,6 +51,8 @@ Claude Desktop on macOS does not see your shell's PATH, so give it the full path
 | `cancel_response(response_id)` | Stops a running answer |
 | `list_conversations(limit?, cursor?)` | Your conversations, most recent first, including the app's |
 | `get_conversation(conversation_id, limit?, cursor?)` | A conversation's questions and answers |
+| `list_agent_results(company?, agent?, mine?, limit?, cursor?)` | Reports Marvin's research agents have written that you can read: yours, shared with you, and public ones |
+| `get_agent_result(agent_result_id)` | One report, in full |
 | `get_format_guide()` | How to show the table and chart blocks in answers |
 
 Answers often take a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for at most `MARVIN_WAIT_SECONDS` (default 50). If the answer isn't ready by then, the model calls `get_response` until it is.

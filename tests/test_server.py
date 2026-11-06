@@ -83,3 +83,85 @@ async def test_only_the_access_gate_404_carries_the_access_hint(message, expecte
     with pytest.raises(RuntimeError, match=expected):
         await server.get_response("resp_1")
 
+
+
+@respx.mock
+async def test_list_agent_results_passes_the_filters_and_shapes_the_page():
+    route = respx.get(f"{API}/agent_results").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "ar-1",
+                        "title": "Q3 call summary",
+                        "agent": "earnings_call_summary",
+                        "status": "completed",
+                        "created_at": 1,
+                        "companies": [{"id": "c-1", "name": "Apple", "ticker": "AAPL"}],
+                        "abstract": "Strong quarter.",
+                    }
+                ],
+                "next_cursor": "next",
+            },
+        )
+    )
+
+    result = await server.list_agent_results(company="AAPL", mine=True, limit=5)
+
+    assert dict(route.calls.last.request.url.params) == {
+        "limit": "5",
+        "company": "AAPL",
+        "mine": "true",
+    }
+    assert result == {
+        "agent_results": [
+            {
+                "agent_result_id": "ar-1",
+                "title": "Q3 call summary",
+                "agent": "earnings_call_summary",
+                "status": "completed",
+                "created_at": 1,
+                "companies": ["AAPL"],
+                "abstract": "Strong quarter.",
+            }
+        ],
+        "next_cursor": "next",
+    }
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "status, text, expected_extra",
+    [
+        ("completed", "## Report", {}),
+        ("running", None, {"next_step": "The agent is still writing this report. Try again later."}),
+    ],
+)
+async def test_get_agent_result_returns_the_report(status, text, expected_extra):
+    respx.get(f"{API}/agent_results/ar-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "ar-1",
+                "title": "Q3 call summary",
+                "agent": "earnings_call_summary",
+                "status": status,
+                "companies": [{"id": "c-1", "name": "Apple", "ticker": None}],
+                "output_text": text,
+                "newer_version_in_progress": False,
+            },
+        )
+    )
+
+    result = await server.get_agent_result("ar-1")
+
+    assert result == {
+        "agent_result_id": "ar-1",
+        "title": "Q3 call summary",
+        "agent": "earnings_call_summary",
+        "status": status,
+        "companies": ["Apple"],
+        "report": text,
+        **expected_extra,
+    }

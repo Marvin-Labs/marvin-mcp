@@ -1,6 +1,7 @@
 """The Marvin MCP server.
 
-Talks only to the public API (``/v1/responses``, ``/v1/conversations``) with
+Talks only to the public API (``/v1/responses``, ``/v1/conversations``,
+``/v1/agent_results``) with
 the user's own Marvin API key, so it runs anywhere and needs nothing from the
 Marvin codebase.
 
@@ -47,7 +48,9 @@ mcp = FastMCP(
         "companies, their filings, financials and markets. Answers can take several minutes: "
         "when ask_marvin returns status queued or in_progress, call get_response with the "
         "response_id until it is completed. To follow up in the same conversation, pass the "
-        "conversation_id from the previous answer. If an answer has ```financial-table or "
+        "conversation_id from the previous answer. For reports Marvin's research agents have "
+        "already written (earnings call summaries and the like), use list_agent_results and "
+        "get_agent_result. If an answer or report has ```financial-table or "
         "```echarts blocks, call get_format_guide for an explanation of their format "
         "conventions."
     ),
@@ -203,6 +206,76 @@ async def get_conversation(
         ],
         "next_cursor": items.get("next_cursor"),
     }
+
+
+@mcp.tool
+async def list_agent_results(
+    company: str | None = None,
+    agent: str | None = None,
+    mine: bool = False,
+    limit: int = 20,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """Reports Marvin's research agents have written that you can read, newest first.
+
+    Includes your own runs, reports shared with you, and public ones. Read one with
+    get_agent_result.
+
+    Args:
+        company: Only reports about this company: a ticker (e.g. AAPL) or company id.
+        agent: Only reports from this agent, by the `agent` name an earlier result shows.
+        mine: Only reports you ran yourself.
+        limit: How many to return (1-100).
+        cursor: The next_cursor of a previous call, for the next page.
+    """
+    params: dict[str, Any] = {"limit": limit}
+    if company:
+        params["company"] = company
+    if agent:
+        params["agent"] = agent
+    if mine:
+        params["mine"] = "true"
+    if cursor:
+        params["cursor"] = cursor
+    page = await _request("GET", "/agent_results", params=params)
+    return {
+        "agent_results": [
+            {
+                "agent_result_id": r["id"],
+                "title": r.get("title"),
+                "agent": r.get("agent"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+                "companies": [co.get("ticker") or co.get("name") for co in r.get("companies", [])],
+                "abstract": r.get("abstract"),
+            }
+            for r in page["data"]
+        ],
+        "next_cursor": page.get("next_cursor"),
+    }
+
+
+@mcp.tool
+async def get_agent_result(agent_result_id: str) -> dict[str, Any]:
+    """One research agent report, with its full text in markdown.
+
+    Args:
+        agent_result_id: From list_agent_results.
+    """
+    result = await _request("GET", f"/agent_results/{agent_result_id}")
+    summary: dict[str, Any] = {
+        "agent_result_id": result["id"],
+        "title": result.get("title"),
+        "agent": result.get("agent"),
+        "status": result["status"],
+        "companies": [co.get("ticker") or co.get("name") for co in result.get("companies", [])],
+        "report": result.get("output_text"),
+    }
+    if result["status"] in ("pending", "running") and not result.get("output_text"):
+        summary["next_step"] = "The agent is still writing this report. Try again later."
+    if result.get("newer_version_in_progress"):
+        summary["note"] = "A newer version is being written; this is the previous one."
+    return summary
 
 
 @mcp.tool
