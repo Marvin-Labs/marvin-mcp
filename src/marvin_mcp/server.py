@@ -196,7 +196,13 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         if response.status_code == 404 and message == "Not Found":
             detail += f" ({ACCESS_MESSAGE})"
         raise RuntimeError(f"Marvin API {response.status_code}: {detail}")
-    return response.json()
+    body = response.json()
+    # A long /v1/tools call answers 200 before it is done, so an error after
+    # that arrives as the error envelope in the 200 body.
+    if isinstance(body, dict) and body.keys() == {"error"} and isinstance(body["error"], dict):
+        error = body["error"]
+        raise RuntimeError(f"Marvin API: {error.get('code')}: {error.get('message')}")
+    return body
 
 
 def _summary(response: dict[str, Any]) -> dict[str, Any]:

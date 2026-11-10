@@ -187,6 +187,20 @@ async def test_a_research_tool_posts_only_the_arguments_given():
     assert result == {"hits": []}
 
 
+@respx.mock
+async def test_a_long_tool_call_that_fails_after_its_200_is_an_error():
+    # The API answers a long call 200 before it is done, then sends the error envelope.
+    respx.post(f"{API}/tools/documents/explore").mock(
+        return_value=httpx.Response(
+            200,
+            content=b'   {"error": {"code": "tool_failed", "message": "Document is empty"}}',
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="tool_failed: Document is empty"):
+        await server.explore_document("AAPL", "fd:k7qm2xp", "What changed?")
+
+
 async def test_every_tool_declares_a_title_and_explicit_safety_hints():
     """Claude and ChatGPT read these; a tool without them is treated as a destructive write."""
     async with Client(server.mcp) as client:
