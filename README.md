@@ -1,14 +1,58 @@
 # Marvin MCP
 
-Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Code or any other MCP client. It runs locally over stdio and only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`) with your own API key. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
+Ask Marvin, Marvin Labs' equity research analyst, from Claude, ChatGPT, Claude Code or any other MCP client. Marvin Labs [hosts it for you](#claude-and-chatgpt) at `https://app-api.marvin-labs.com/v1/mcp`, or you can [run it locally](#claude-code-codex-and-desktop-apps) over stdio. Either way it only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`) as you. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
 
 ## Setup
 
-You need:
+This is a private alpha. Please email marvin@marvin-labs.com for access.
 
-1. **Access.** This is a private alpha version. Please email marvin@marvin-labs.com for access.
-2. **An API key.** In the app: Account → API keys → Add new key.
-3. **uv** (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
+### Claude and ChatGPT
+
+[![Add to Claude](https://img.shields.io/badge/Claude-Add_connector-D97757?style=flat-square&logo=claude&logoColor=white)](https://claude.ai/customize/connectors)
+[![Add to ChatGPT](https://img.shields.io/badge/ChatGPT-Add_MCP_server-10A37F?style=flat-square)](https://chatgpt.com/plugins)
+
+There is nothing to install and no API key: you add the URL below once, then sign in with your Marvin account. The buttons open the right page, but neither app can fill in the form from a link yet, so paste the URL yourself:
+
+```text
+https://app-api.marvin-labs.com/v1/mcp
+```
+
+**Claude** (claude.ai, Desktop and mobile):
+
+1. Open [Customize → Connectors](https://claude.ai/customize/connectors) on claude.ai or in Claude Desktop.
+2. Click **+ Add**, then **Add custom connector**.
+3. Name it `Marvin` and paste the URL.
+4. Keep the detected sign-in settings (OAuth, with Claude's own OAuth client) and click **Add**.
+5. Click **Connect** and sign in to Marvin.
+
+To use it, click **+** in a chat, open **Connectors** and turn Marvin on. Once added, the connector also works in the mobile apps. On the Free plan it counts as your one custom connector. On Team and Enterprise plans an owner adds it once under [Organization settings → Connectors](https://claude.ai/admin-settings/connectors) (**Add → Custom → Web**), and then each member clicks **Connect** in their own Customize → Connectors.
+
+**ChatGPT** (web, Business, Enterprise and Edu plans; your workspace admin may need to allow custom MCP servers):
+
+1. Open [Plugins](https://chatgpt.com/plugins).
+2. Click **+**, then **Add custom MCP server**.
+3. Name it `Marvin`, add a short description, and paste the URL under **Connection**.
+4. Choose **OAuth** for authentication, confirm the warning, then **Create as a plugin**.
+5. Sign in to Marvin when ChatGPT asks.
+
+To use it, type `@Marvin` in a new conversation.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http marvin https://app-api.marvin-labs.com/v1/mcp
+```
+
+Then run `/mcp` in Claude Code to sign in. To use an API key instead of signing in, add `--header "Authorization: Bearer ak_..."`.
+
+Long research tool calls can time out on the hosted server. If you need them, run the server locally.
+
+### Claude Code, Codex and desktop apps
+
+To run the server on your own machine you need:
+
+1. **An API key.** In the app: Account → API keys → Add new key.
+2. **uv** (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
 Then, from the project you want Marvin in, run:
 
@@ -27,7 +71,7 @@ It asks for your API key, checks that it works, and adds Marvin to the clients i
 
 Run it again to change the key. `--yes` sets up every client found without asking; `MARVIN_API_KEY` in the environment skips the key prompt; `--api-url` points the clients at another environment, such as stg.
 
-### By hand
+#### By hand
 
 Any MCP client that starts local (stdio) servers works. The command is `uvx`, the arguments are `--refresh --from git+https://github.com/Marvin-Labs/marvin-mcp marvin-mcp`, and `MARVIN_API_KEY` goes in the server's environment. For example:
 

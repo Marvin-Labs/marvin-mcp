@@ -15,9 +15,14 @@ tool call. So ``ask_marvin`` starts the turn in the background and waits for
 it only up to ``MARVIN_WAIT_SECONDS``. If it is not done by then, the tool
 returns the response id and ``get_response`` picks up the wait.
 
+Run locally it authenticates with ``MARVIN_API_KEY``. Marvin also hosts this
+same server for remote clients (Claude, ChatGPT): there the client signs in
+with OAuth, and each tool call forwards that user's access token instead
+(``configure_api`` points the tools at the hosting API).
+
 Configuration (environment):
 
-- ``MARVIN_API_KEY``: required, a Marvin API key.
+- ``MARVIN_API_KEY``: required when run locally, a Marvin API key.
 - ``MARVIN_API_URL``: optional; the public production API unless set (for
   example to stg or a local API).
 - ``MARVIN_WAIT_SECONDS``: optional, how long one tool call waits for an
@@ -34,6 +39,7 @@ from typing import Any
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
 
 from marvin_mcp.formats import FORMAT_GUIDE
 
@@ -69,14 +75,40 @@ mcp = FastMCP(
 )
 
 
-def _client() -> httpx.AsyncClient:
+# Where the tools send their requests when the server is hosted inside the
+# Marvin API rather than run locally; set by ``configure_api``.
+_api_base_url: str | None = None
+_api_transport: httpx.AsyncBaseTransport | None = None
+
+
+def configure_api(base_url: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    """Point the tools at ``base_url`` (and optionally a transport), not the environment.
+
+    For hosting the server inside the API itself, where requests go in-process.
+    """
+    global _api_base_url, _api_transport
+    _api_base_url = base_url
+    _api_transport = transport
+
+
+def _credential() -> str:
+    # Hosted: the MCP client signed in with OAuth and the request carries the
+    # user's access token. Local: the user's own API key.
+    if (access_token := get_access_token()) is not None:
+        return access_token.token
     key = os.environ.get("MARVIN_API_KEY")
     if not key:
         raise RuntimeError("Set MARVIN_API_KEY to your Marvin API key.")
+    return key
+
+
+def _client() -> httpx.AsyncClient:
+    base_url = _api_base_url or os.environ.get("MARVIN_API_URL", DEFAULT_API_URL)
     return httpx.AsyncClient(
-        base_url=os.environ.get("MARVIN_API_URL", DEFAULT_API_URL).rstrip("/") + "/v1",
-        headers={"Authorization": f"Bearer {key}"},
+        base_url=base_url.rstrip("/") + "/v1",
+        headers={"Authorization": f"Bearer {_credential()}"},
         timeout=60.0,
+        transport=_api_transport,
     )
 
 
