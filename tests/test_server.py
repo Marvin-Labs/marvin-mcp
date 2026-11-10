@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 import respx
+from fastmcp import Client
 
 from marvin_mcp import server
 
@@ -184,3 +185,36 @@ async def test_a_research_tool_posts_only_the_arguments_given():
         "n_results": 10,
     }
     assert result == {"hits": []}
+
+
+async def test_every_tool_declares_a_title_and_explicit_safety_hints():
+    """Claude and ChatGPT read these; a tool without them is treated as a destructive write."""
+    async with Client(server.mcp) as client:
+        tools = await client.list_tools()
+
+    hints = ("readOnlyHint", "destructiveHint", "openWorldHint")
+    for tool in tools:
+        assert tool.title, tool.name
+        assert tool.annotations is not None, tool.name
+        assert all(isinstance(getattr(tool.annotations, h), bool) for h in hints), tool.name
+        assert tool.annotations.openWorldHint is False, tool.name
+    writes = {t.name for t in tools if not t.annotations.readOnlyHint}
+    destructive = {t.name for t in tools if t.annotations.destructiveHint}
+    assert writes == {"ask_marvin", "cancel_response"}
+    assert destructive == {"cancel_response"}
+
+
+@respx.mock
+async def test_requests_name_the_client_and_the_tool_that_made_them():
+    """The API attributes MCP usage from these headers; the client sends nothing else."""
+    route = respx.post(f"{API}/tools/documents/search").mock(
+        return_value=httpx.Response(200, json={"hits": []})
+    )
+
+    async with Client(server.mcp) as client:
+        await client.call_tool("search_documents", {"company": "AAPL", "query": "services"})
+
+    sent = route.calls.last.request.headers
+    assert sent["user-agent"].startswith("marvin-mcp/")
+    assert "(hosted)" not in sent["user-agent"]
+    assert sent[server.TOOL_HEADER] == "search_documents"

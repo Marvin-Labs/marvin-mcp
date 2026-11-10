@@ -127,6 +127,8 @@ Answers can contain tables and charts, written as JSON in ```` ```financial-tabl
 
 Every answer is a normal Marvin chat turn and uses your credits the same way.
 
+Each request to the Marvin API sends `User-Agent: marvin-mcp/<version>` and the name of the tool that made it (`X-Marvin-Client-Tool`), so Marvin can see which tools are used. The server collects nothing else and sends no telemetry of its own.
+
 ## Development
 
 ```bash

@@ -35,11 +35,14 @@ import asyncio
 import os
 import sys
 import time
+from contextvars import ContextVar
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 from marvin_mcp.formats import FORMAT_GUIDE
 
@@ -54,6 +57,29 @@ DEFAULT_WAIT_SECONDS = 50.0
 TOOL_TIMEOUT_SECONDS = 660.0
 POLL_SECONDS = 3.0
 UNFINISHED = ("queued", "in_progress")
+
+# Tool annotations (MCP ``ToolAnnotations``): Claude runs read-only tools without
+# asking each time and always asks before destructive ones; ChatGPT treats a
+# tool without readOnlyHint as a write that needs confirmation, and its app
+# review wants all three hints set explicitly. Every tool here touches only the
+# user's own Marvin data, so none is open-world.
+READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
+# ask_marvin starts a conversation turn and spends credits: a write, additive
+# rather than destructive, and not idempotent (each call is a new turn).
+WRITE = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
+# Stopping an answer cannot be taken back, which both clients count as
+# destructive; cancelling twice changes nothing more.
+CANCEL = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
 
 mcp = FastMCP(
     "Marvin",
@@ -73,6 +99,33 @@ mcp = FastMCP(
         "read_document opens any of them."
     ),
 )
+
+
+# Every request names this client and the tool that made it, so the API can
+# tell MCP traffic from other API callers. The client itself collects nothing.
+TOOL_HEADER = "X-Marvin-Client-Tool"
+_current_tool: ContextVar[str | None] = ContextVar("marvin_mcp_tool", default=None)
+
+
+def _package_version() -> str:
+    try:
+        return version("marvin-mcp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+class _ToolNameMiddleware(Middleware):
+    """Remember which tool is running, for the header its requests carry."""
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):  # type: ignore[override]
+        token = _current_tool.set(context.message.name)
+        try:
+            return await call_next(context)
+        finally:
+            _current_tool.reset(token)
+
+
+mcp.add_middleware(_ToolNameMiddleware())
 
 
 # Where the tools send their requests when the server is hosted inside the
@@ -102,11 +155,22 @@ def _credential() -> str:
     return key
 
 
+def _headers() -> dict[str, str]:
+    # "(hosted)" marks the copy the API serves at /v1/mcp, set up by configure_api.
+    user_agent = f"marvin-mcp/{_package_version()}"
+    if _api_base_url is not None:
+        user_agent += " (hosted)"
+    headers = {"Authorization": f"Bearer {_credential()}", "User-Agent": user_agent}
+    if (tool := _current_tool.get()) is not None:
+        headers[TOOL_HEADER] = tool
+    return headers
+
+
 def _client() -> httpx.AsyncClient:
     base_url = _api_base_url or os.environ.get("MARVIN_API_URL", DEFAULT_API_URL)
     return httpx.AsyncClient(
         base_url=base_url.rstrip("/") + "/v1",
-        headers={"Authorization": f"Bearer {_credential()}"},
+        headers=_headers(),
         timeout=60.0,
         transport=_api_transport,
     )
@@ -159,7 +223,7 @@ async def _wait(response: dict[str, Any], wait_seconds: float) -> dict[str, Any]
     return response
 
 
-@mcp.tool
+@mcp.tool(title="Ask Marvin", annotations=WRITE)
 async def ask_marvin(question: str, conversation_id: str | None = None) -> dict[str, Any]:
     """Ask Marvin a question; returns its answer, or a response_id to poll.
 
@@ -175,7 +239,7 @@ async def ask_marvin(question: str, conversation_id: str | None = None) -> dict[
     return _summary(await _wait(started, _wait_seconds()))
 
 
-@mcp.tool
+@mcp.tool(title="Get Marvin's answer", annotations=READ)
 async def get_response(response_id: str) -> dict[str, Any]:
     """Wait a little longer for an answer that ask_marvin left running.
 
@@ -186,7 +250,7 @@ async def get_response(response_id: str) -> dict[str, Any]:
     return _summary(await _wait(current, _wait_seconds()))
 
 
-@mcp.tool
+@mcp.tool(title="Cancel a running answer", annotations=CANCEL)
 async def cancel_response(response_id: str) -> dict[str, Any]:
     """Stop an answer that is still running.
 
@@ -199,7 +263,7 @@ async def cancel_response(response_id: str) -> dict[str, Any]:
     return summary
 
 
-@mcp.tool
+@mcp.tool(title="List conversations", annotations=READ)
 async def list_conversations(limit: int = 20, cursor: str | None = None) -> dict[str, Any]:
     """Your Marvin conversations, most recently updated first, including ones from the app.
 
@@ -225,7 +289,7 @@ async def list_conversations(limit: int = 20, cursor: str | None = None) -> dict
     }
 
 
-@mcp.tool
+@mcp.tool(title="Read a conversation", annotations=READ)
 async def get_conversation(
     conversation_id: str, limit: int = 20, cursor: str | None = None
 ) -> dict[str, Any]:
@@ -252,7 +316,7 @@ async def get_conversation(
     }
 
 
-@mcp.tool
+@mcp.tool(title="List research reports", annotations=READ)
 async def list_agent_results(
     company: str | None = None,
     agent: str | None = None,
@@ -299,7 +363,7 @@ async def list_agent_results(
     }
 
 
-@mcp.tool
+@mcp.tool(title="Read a research report", annotations=READ)
 async def get_agent_result(agent_result_id: str) -> dict[str, Any]:
     """One research agent report, with its full text in markdown.
 
@@ -322,7 +386,7 @@ async def get_agent_result(agent_result_id: str) -> dict[str, Any]:
     return summary
 
 
-@mcp.tool
+@mcp.tool(title="Table and chart format guide", annotations=READ)
 def get_format_guide() -> str:
     """How to render the ```financial-table and ```echarts blocks in Marvin's answers.
 
@@ -342,7 +406,7 @@ async def _tool(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return await _request("POST", f"/tools/{path}", json=payload, timeout=TOOL_TIMEOUT_SECONDS)
 
 
-@mcp.tool
+@mcp.tool(title="List a company's documents", annotations=READ)
 async def list_documents(
     company: str,
     document_type: list[str] | None = None,
@@ -382,7 +446,7 @@ async def list_documents(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Search a company's documents", annotations=READ)
 async def search_documents(
     company: str,
     query: str,
@@ -426,7 +490,7 @@ async def search_documents(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Read a document", annotations=READ)
 async def read_document(
     document_id: str,
     section: str | None = None,
@@ -459,7 +523,7 @@ async def read_document(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Explore a document", annotations=READ)
 async def explore_document(
     company: str, document_id: str, question: str, section: str | None = None
 ) -> dict[str, Any]:
@@ -485,7 +549,7 @@ async def explore_document(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Query financial figures", annotations=READ)
 async def query_financials(
     company: str, queries: list[str], bias: str | None = None
 ) -> dict[str, Any]:
@@ -512,7 +576,7 @@ async def query_financials(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Get financial statements", annotations=READ)
 async def get_financial_statements(
     company: str, statement: str | None = None, periods: list[str] | None = None
 ) -> dict[str, Any]:
@@ -536,7 +600,7 @@ async def get_financial_statements(
     )
 
 
-@mcp.tool
+@mcp.tool(title="Trace a financial figure to its source", annotations=READ)
 async def get_financial_provenance(
     company: str, datapoints: list[str | dict[str, Any]]
 ) -> dict[str, Any]:
