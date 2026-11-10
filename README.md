@@ -1,6 +1,6 @@
 # Marvin MCP
 
-Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Code or any other MCP client. It runs locally over stdio and only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`) with your own API key. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
+Ask Marvin, Marvin Labs' equity research analyst, from Claude Desktop, Claude Code or any other MCP client. It runs locally over stdio and only calls the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`) with your own API key. Conversations you start here show up in the Marvin app, and app conversations can be continued from here.
 
 ## Setup
 
@@ -54,6 +54,20 @@ Claude Desktop on macOS does not see your shell's PATH, so give it the full path
 | `list_agent_results(company?, agent?, mine?, limit?, cursor?)` | Reports Marvin's research agents have written that you can read: yours, shared with you, and public ones |
 | `get_agent_result(agent_result_id)` | One report, in full |
 | `get_format_guide()` | How to show the table and chart blocks in answers |
+
+To research a company yourself instead of asking Marvin, use the same tools Marvin's analysts use. Each answers in one call, outside any conversation:
+
+| Tool | Does |
+|---|---|
+| `list_documents(company, document_type?, period?, date_from?, date_to?, limit?, cursor?)` | A company's documents, newest first: filings, transcripts, press releases, Marvin's reports and your uploads |
+| `search_documents(company, query, terms?, n_results?, document_type?, period?, date_from?, date_to?)` | The passages in a company's documents that answer a question, best first |
+| `read_document(document_id, section?, query?, start_token_offset?, max_token_length?)` | A document by its id: whole, a window, or the text around a match |
+| `explore_document(company, document_id, question, section?)` | What one document says about a question, as verbatim passages and a summary |
+| `query_financials(company, queries, bias?)` | Reported figures and consensus estimates by metric and period |
+| `get_financial_statements(company, statement?, periods?)` | A statement whole, every line in order; without `statement`, the list of statements |
+| `get_financial_provenance(company, datapoints)` | The document and line each figure was read from, or a computed figure's inputs |
+
+Document ids such as `fd:k7qm2xp` stay valid: keep them and pass them back to `read_document`. The financials tools cite figures with the same ids. `search_documents`, `explore_document` and `query_financials` use credits.
 
 Answers often take a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for at most `MARVIN_WAIT_SECONDS` (default 50). If the answer isn't ready by then, the model calls `get_response` until it is.
 

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -165,3 +167,20 @@ async def test_get_agent_result_returns_the_report(status, text, expected_extra)
         "report": text,
         **expected_extra,
     }
+
+
+@respx.mock
+async def test_a_research_tool_posts_only_the_arguments_given():
+    # The API rejects an explicit null for a list argument such as `terms`.
+    route = respx.post(f"{API}/tools/documents/search").mock(
+        return_value=httpx.Response(200, json={"hits": []})
+    )
+
+    result = await server.search_documents("AAPL", "How did services revenue grow?")
+
+    assert json.loads(route.calls.last.request.content) == {
+        "company": "AAPL",
+        "query": "How did services revenue grow?",
+        "n_results": 10,
+    }
+    assert result == {"hits": []}

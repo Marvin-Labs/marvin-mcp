@@ -1,9 +1,14 @@
 """The Marvin MCP server.
 
 Talks only to the public API (``/v1/responses``, ``/v1/conversations``,
-``/v1/agent_results``) with
+``/v1/agent_results``, ``/v1/tools``) with
 the user's own Marvin API key, so it runs anywhere and needs nothing from the
 Marvin codebase.
+
+Besides asking Marvin, it exposes the research tools Marvin's own analysts use
+(``/v1/tools``): a company's documents (list, search, read, explore) and its
+financials (figures, whole statements, the evidence behind a figure). They
+answer in one call each, without a conversation.
 
 Marvin's answers often take minutes, longer than an MCP client waits on one
 tool call. So ``ask_marvin`` starts the turn in the background and waits for
@@ -38,6 +43,9 @@ ACCESS_MESSAGE = (
     "This is a private alpha version. Please email marvin@marvin-labs.com for access."
 )
 DEFAULT_WAIT_SECONDS = 50.0
+# How long one research-tool call may take: the API's own longest tool limit
+# (a wide financials query) plus a margin.
+TOOL_TIMEOUT_SECONDS = 660.0
 POLL_SECONDS = 3.0
 UNFINISHED = ("queued", "in_progress")
 
@@ -52,7 +60,11 @@ mcp = FastMCP(
         "already written (earnings call summaries and the like), use list_agent_results and "
         "get_agent_result. If an answer or report has ```financial-table or "
         "```echarts blocks, call get_format_guide for an explanation of their format "
-        "conventions."
+        "conventions. To research yourself instead of asking Marvin, use the document tools "
+        "(list_documents, search_documents, read_document, explore_document) and the "
+        "financials tools (query_financials, get_financial_statements, "
+        "get_financial_provenance). Cite figures with the `fd:` document ids they return; "
+        "read_document opens any of them."
     ),
 )
 
@@ -287,6 +299,230 @@ def get_format_guide() -> str:
     markdown tables (or charts, if you can draw them).
     """
     return FORMAT_GUIDE
+
+
+# --- Research tools (/v1/tools) ---------------------------------------------
+
+
+async def _tool(path: str, body: dict[str, Any]) -> dict[str, Any]:
+    """POST a research tool's arguments, leaving out the ones not given."""
+    payload = {key: value for key, value in body.items() if value is not None}
+    return await _request("POST", f"/tools/{path}", json=payload, timeout=TOOL_TIMEOUT_SECONDS)
+
+
+@mcp.tool
+async def list_documents(
+    company: str,
+    document_type: list[str] | None = None,
+    period: list[str] | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 10,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """A company's documents, newest first: filings, transcripts, press releases,
+    Marvin's reports and your own uploads.
+
+    Each document has a short `id` (e.g. `fd:k7qm2xp`) to pass to read_document and
+    explore_document; it stays valid.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id.
+        document_type: Only these kinds: `filing_document`, `agent_result` (Marvin's
+            reports) or `user_document` (your uploads).
+        period: Earnings periods, e.g. ["1Q-2024"]; keeps to filings.
+        date_from: Only documents dated on or after this day (YYYY-MM-DD).
+        date_to: Only documents dated on or before this day (YYYY-MM-DD).
+        limit: How many to return.
+        cursor: The next_cursor of a previous call, for the next page.
+    """
+    return await _tool(
+        "documents/list",
+        {
+            "company": company,
+            "document_type": document_type,
+            "period": period,
+            "date_from": date_from,
+            "date_to": date_to,
+            "limit": limit,
+            "cursor": cursor,
+        },
+    )
+
+
+@mcp.tool
+async def search_documents(
+    company: str,
+    query: str,
+    terms: list[str] | None = None,
+    n_results: int = 10,
+    document_type: list[str] | None = None,
+    period: list[str] | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """The passages in a company's documents that answer `query`, best first.
+
+    Read around a passage with read_document, its document `id` and the passage's
+    `start_token_offset`.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id.
+        query: One sentence saying what you are looking for: the metric, the segment,
+            the period.
+        terms: Up to 8 keywords or phrases a matching passage would contain.
+        n_results: How many documents to return.
+        document_type: Only these kinds: `filing_document`, `agent_result` or
+            `user_document`.
+        period: Earnings periods, e.g. ["1Q-2024"]; keeps to filings.
+        date_from: Only documents dated on or after this day (YYYY-MM-DD).
+        date_to: Only documents dated on or before this day (YYYY-MM-DD): what was
+            known then.
+    """
+    return await _tool(
+        "documents/search",
+        {
+            "company": company,
+            "query": query,
+            "terms": terms,
+            "n_results": n_results,
+            "document_type": document_type,
+            "period": period,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+    )
+
+
+@mcp.tool
+async def read_document(
+    document_id: str,
+    section: str | None = None,
+    query: str | None = None,
+    start_token_offset: int | None = None,
+    max_token_length: int | None = None,
+) -> dict[str, Any]:
+    """Read a document by its id: whole, a window of it, or the text around a match.
+
+    A long document read without `query` or offsets returns a preview with its
+    `sections`. When `has_more` is true, read on from `end_token_offset`.
+
+    Args:
+        document_id: An `id` from list_documents or search_documents, or an `fd:`
+            citation from the financials tools.
+        section: Key of one section from a preview's `sections` (filings only).
+        query: Text to find inside the document; overrides start_token_offset.
+        start_token_offset: Where to start reading.
+        max_token_length: How much to read.
+    """
+    return await _tool(
+        "documents/read",
+        {
+            "document_id": document_id,
+            "section": section,
+            "query": query,
+            "start_token_offset": start_token_offset,
+            "max_token_length": max_token_length,
+        },
+    )
+
+
+@mcp.tool
+async def explore_document(
+    company: str, document_id: str, question: str, section: str | None = None
+) -> dict[str, Any]:
+    """What one document says about `question`, as verbatim passages and a summary.
+
+    The document is read for you; `coverage` says how much of it. Cheaper on your
+    context than reading a long document whole.
+
+    Args:
+        company: The document's company: a ticker or company id.
+        document_id: An `id` from list_documents or search_documents.
+        question: What you want to know from this document, in one or two sentences.
+        section: Key of one section from a read_document preview: read only that.
+    """
+    return await _tool(
+        "documents/explore",
+        {
+            "company": company,
+            "document_id": document_id,
+            "question": question,
+            "section": section,
+        },
+    )
+
+
+@mcp.tool
+async def query_financials(
+    company: str, queries: list[str], bias: str | None = None
+) -> dict[str, Any]:
+    """A company's reported figures (and consensus estimates) by metric and period.
+
+    Name metrics and periods in plain words, e.g. "revenue and EBITDA FY2023-FY2024"
+    or "iPhone net sales last 8 quarters". Put every metric and period you need in
+    one call: they are resolved together. A whole statement asked for here comes
+    back under `redirects`; read it with get_financial_statements. Not for company
+    guidance or outlook.
+
+    Each value has `citations` (`fd:` document ids) and an `id` (or a computed
+    figure's `inputs`) for get_financial_provenance.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id.
+        queries: Plain-language queries naming metrics and periods.
+        bias: "common" for figures normalised to compare across companies,
+            "as_reported" for the company's own lines and labels. Omit for the best
+            match.
+    """
+    return await _tool(
+        "financials/query", {"company": company, "queries": queries, "bias": bias}
+    )
+
+
+@mcp.tool
+async def get_financial_statements(
+    company: str, statement: str | None = None, periods: list[str] | None = None
+) -> dict[str, Any]:
+    """A company's financial statements whole: every line in order, with subtotals
+    and totals, across periods. Call without `statement` for the list it has.
+
+    `common:<report>` statements are normalised to compare across companies;
+    `as_reported:<table>` are the company's own, as it prints them. A row with a
+    `dimension` is one segment, product or country, never the consolidated figure.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id.
+        statement: A statement id from the list, e.g. "common:income_statement" or
+            "as_reported:balance_sheet". Omit for the list.
+        periods: Reporting periods, e.g. ["FY-2023", "FY-2024"] or ["2Q-2025"].
+            Omit for the last five fiscal years.
+    """
+    return await _tool(
+        "financials/statements",
+        {"company": company, "statement": statement, "periods": periods},
+    )
+
+
+@mcp.tool
+async def get_financial_provenance(
+    company: str, datapoints: list[str | dict[str, Any]]
+) -> dict[str, Any]:
+    """Where figures come from: the document and statement line each was read from,
+    or the inputs a computed figure was computed from.
+
+    Only when asked where a figure comes from or to verify it; the `citations` the
+    financials tools return are enough to cite a figure.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id.
+        datapoints: The figures' `id`s (e.g. "dp:4hq8m2xta"), or a computed figure's
+            `inputs`, from query_financials or get_financial_statements. Or name a
+            stored figure as {"element", "period", "dimensions"}.
+    """
+    return await _tool(
+        "financials/provenance", {"company": company, "datapoints": datapoints}
+    )
 
 
 def main() -> None:
