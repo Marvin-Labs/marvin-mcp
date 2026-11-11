@@ -1,0 +1,927 @@
+{
+  "explore_document": {
+    "properties": {
+      "coverage": {
+        "anyOf": [
+          {
+            "enum": [
+              "full",
+              "section",
+              "narrative",
+              "ranked",
+              "sampled"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "What was read: the whole document, a section, the parts that best match the question, or a sample.",
+        "title": "Coverage"
+      },
+      "document_date": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Document Date"
+      },
+      "document_type": {
+        "title": "Document Type",
+        "type": "string"
+      },
+      "earnings_period": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Earnings Period"
+      },
+      "full_id": {
+        "title": "Full Id",
+        "type": "string"
+      },
+      "id": {
+        "description": "The id you passed.",
+        "title": "Id",
+        "type": "string"
+      },
+      "kind": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Kind"
+      },
+      "link": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Link"
+      },
+      "not_found": {
+        "description": "The document does not address the question.",
+        "title": "Not Found",
+        "type": "boolean"
+      },
+      "note": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Note"
+      },
+      "passages": {
+        "description": "Verbatim passages from the document that answer the question.",
+        "items": {
+          "type": "string"
+        },
+        "title": "Passages",
+        "type": "array"
+      },
+      "summary": {
+        "title": "Summary",
+        "type": "string"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "full_id",
+      "document_type",
+      "title",
+      "passages",
+      "summary",
+      "not_found"
+    ],
+    "title": "ExploreDocumentResponse",
+    "type": "object"
+  },
+  "get_financial_provenance": {
+    "additionalProperties": true,
+    "type": "object"
+  },
+  "get_financial_statements": {
+    "additionalProperties": true,
+    "type": "object"
+  },
+  "list_documents": {
+    "$defs": {
+      "ToolDocument": {
+        "description": "One document in a listing.",
+        "properties": {
+          "abstract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Abstract"
+          },
+          "document_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Document Date"
+          },
+          "document_type": {
+            "title": "Document Type",
+            "type": "string"
+          },
+          "earnings_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Earnings Period"
+          },
+          "full_id": {
+            "description": "Prefixed row id, e.g. `fd:6f1c…`.",
+            "title": "Full Id",
+            "type": "string"
+          },
+          "id": {
+            "description": "Short id, e.g. `fd:k7qm2xp`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Form type of a filing, agent name of a report, type of an upload.",
+            "title": "Kind"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The document in the Marvin app.",
+            "title": "Link"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "token_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Token Length"
+          }
+        },
+        "required": [
+          "id",
+          "full_id",
+          "document_type",
+          "title"
+        ],
+        "title": "ToolDocument",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "documents": {
+        "items": {
+          "$ref": "#/$defs/ToolDocument"
+        },
+        "title": "Documents",
+        "type": "array"
+      },
+      "next_cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Next Cursor"
+      }
+    },
+    "required": [
+      "documents"
+    ],
+    "title": "ListDocumentsResponse",
+    "type": "object"
+  },
+  "query_financials": {
+    "$defs": {
+      "CompanyFinancialResult": {
+        "description": "One series of figures, all on one basis.",
+        "properties": {
+          "basis": {
+            "description": "common: normalised onto the common taxonomy; as_reported: the company's own tagged line",
+            "enum": [
+              "common",
+              "as_reported"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "dimension": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Dimension"
+          },
+          "element": {
+            "description": "The element the figures are read from",
+            "title": "Element",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Statement"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/$defs/ValuePeriodPair"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "label",
+          "basis",
+          "element",
+          "values"
+        ],
+        "title": "CompanyFinancialResult",
+        "type": "object"
+      },
+      "MissingPeriods": {
+        "description": "Requested periods of a query without a value, among those the company\nhas data for. One entry per distinct reason, not per period: a wide\ngrid's gaps were most of a return, and the model is shown them again on\nevery later request of the turn.",
+        "properties": {
+          "periods": {
+            "items": {
+              "properties": {
+                "canonical_period_text": {
+                  "readOnly": true,
+                  "title": "Canonical Period Text",
+                  "type": "string"
+                },
+                "downscaled_period_text": {
+                  "readOnly": true,
+                  "title": "Downscaled Period Text",
+                  "type": "string"
+                },
+                "period_display_name": {
+                  "readOnly": true,
+                  "title": "Period Display Name",
+                  "type": "string"
+                },
+                "period_number": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "const": "irregular",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Period Number"
+                },
+                "period_type": {
+                  "title": "Period Type",
+                  "type": "string"
+                },
+                "year": {
+                  "title": "Year",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "year",
+                "period_type"
+              ],
+              "title": "ReportingPeriod",
+              "type": "object"
+            },
+            "title": "Periods",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "periods"
+        ],
+        "title": "MissingPeriods",
+        "type": "object"
+      },
+      "QueryResult": {
+        "description": "One metric the caller's queries were decomposed into: the figures\nfound for it, on one basis per series, and its gaps.",
+        "properties": {
+          "from_query": {
+            "description": "Index of the caller's query it was decomposed from",
+            "title": "From Query",
+            "type": "integer"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/$defs/MissingPeriods"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "query": {
+            "description": "The metric and periods this result answers",
+            "title": "Query",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/$defs/CompanyFinancialResult"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "from_query"
+        ],
+        "title": "QueryResult",
+        "type": "object"
+      },
+      "Redirect": {
+        "description": "A caller's query served by another tool.",
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "use": {
+            "const": "get_financial_statements",
+            "default": "get_financial_statements",
+            "title": "Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "statement"
+        ],
+        "title": "Redirect",
+        "type": "object"
+      },
+      "ValuePeriodPair": {
+        "additionalProperties": true,
+        "type": "object"
+      }
+    },
+    "description": "Final result of query_financials — one result per decomposed metric,\nthe queries redirected to another tool, and the periods the company has\nno data for at all.",
+    "properties": {
+      "periods_without_data": {
+        "description": "Requested periods the company has no financial data for at all; not repeated under missing.",
+        "items": {
+          "properties": {
+            "canonical_period_text": {
+              "readOnly": true,
+              "title": "Canonical Period Text",
+              "type": "string"
+            },
+            "downscaled_period_text": {
+              "readOnly": true,
+              "title": "Downscaled Period Text",
+              "type": "string"
+            },
+            "period_display_name": {
+              "readOnly": true,
+              "title": "Period Display Name",
+              "type": "string"
+            },
+            "period_number": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "const": "irregular",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Number"
+            },
+            "period_type": {
+              "title": "Period Type",
+              "type": "string"
+            },
+            "year": {
+              "title": "Year",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "year",
+            "period_type"
+          ],
+          "title": "ReportingPeriod",
+          "type": "object"
+        },
+        "title": "Periods Without Data",
+        "type": "array"
+      },
+      "redirects": {
+        "items": {
+          "$ref": "#/$defs/Redirect"
+        },
+        "title": "Redirects",
+        "type": "array"
+      },
+      "results": {
+        "items": {
+          "$ref": "#/$defs/QueryResult"
+        },
+        "title": "Results",
+        "type": "array"
+      },
+      "unrecognised_periods": {
+        "description": "Requested labels that are not reporting periods (e.g. calendar dates), so nothing was looked up for them. Periods are fiscal: FY-2024, 3Q-2024, 1H-2024, 9M-2024.",
+        "items": {
+          "type": "string"
+        },
+        "title": "Unrecognised Periods",
+        "type": "array"
+      }
+    },
+    "required": [
+      "results"
+    ],
+    "title": "FinancialQueryResult",
+    "type": "object"
+  },
+  "read_document": {
+    "$defs": {
+      "DocumentSearchMatch": {
+        "description": "One fuzzy match of a query inside a document.",
+        "properties": {
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "start_token_offset": {
+            "title": "Start Token Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snippet",
+          "start_token_offset",
+          "similarity"
+        ],
+        "title": "DocumentSearchMatch",
+        "type": "object"
+      },
+      "DocumentSection": {
+        "description": "One outline entry: a section/heading with its token location/extent.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Key"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "start_token_offset": {
+            "title": "Start Token Offset",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "token_length": {
+            "title": "Token Length",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title",
+          "level",
+          "start_token_offset",
+          "token_length"
+        ],
+        "title": "DocumentSection",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "content": {
+        "title": "Content",
+        "type": "string"
+      },
+      "document_type": {
+        "title": "Document Type",
+        "type": "string"
+      },
+      "end_token_offset": {
+        "title": "End Token Offset",
+        "type": "integer"
+      },
+      "full_id": {
+        "title": "Full Id",
+        "type": "string"
+      },
+      "has_more": {
+        "description": "More follows: read on from `end_token_offset`.",
+        "title": "Has More",
+        "type": "boolean"
+      },
+      "id": {
+        "description": "The id you passed.",
+        "title": "Id",
+        "type": "string"
+      },
+      "kind": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Kind"
+      },
+      "link": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Link"
+      },
+      "matches": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/DocumentSearchMatch"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Where `query` matched.",
+        "title": "Matches"
+      },
+      "note": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Note"
+      },
+      "sections": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/DocumentSection"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "The outline, when this was a preview.",
+        "title": "Sections"
+      },
+      "start_token_offset": {
+        "title": "Start Token Offset",
+        "type": "integer"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "total_token_length": {
+        "title": "Total Token Length",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "full_id",
+      "document_type",
+      "title",
+      "content",
+      "start_token_offset",
+      "end_token_offset",
+      "total_token_length",
+      "has_more"
+    ],
+    "title": "ReadDocumentResponse",
+    "type": "object"
+  },
+  "search_documents": {
+    "$defs": {
+      "SearchHit": {
+        "properties": {
+          "document_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Document Date"
+          },
+          "document_type": {
+            "title": "Document Type",
+            "type": "string"
+          },
+          "earnings_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Earnings Period"
+          },
+          "full_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Full Id"
+          },
+          "id": {
+            "description": "Short id, e.g. `fd:k7qm2xp`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Kind"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Link"
+          },
+          "passages": {
+            "items": {
+              "$ref": "#/$defs/SearchPassage"
+            },
+            "title": "Passages",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Title"
+          },
+          "token_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Token Length"
+          }
+        },
+        "required": [
+          "id",
+          "document_type",
+          "passages"
+        ],
+        "title": "SearchHit",
+        "type": "object"
+      },
+      "SearchPassage": {
+        "properties": {
+          "start_token_offset": {
+            "description": "Pass to `/read` as `start_token_offset` to read around it.",
+            "title": "Start Token Offset",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "start_token_offset"
+        ],
+        "title": "SearchPassage",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "hits": {
+        "items": {
+          "$ref": "#/$defs/SearchHit"
+        },
+        "title": "Hits",
+        "type": "array"
+      },
+      "note": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Why nothing matched, when nothing did.",
+        "title": "Note"
+      }
+    },
+    "required": [
+      "hits"
+    ],
+    "title": "SearchDocumentsResponse",
+    "type": "object"
+  }
+}

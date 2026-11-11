@@ -32,19 +32,25 @@ Configuration (environment):
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
 from contextvars import ContextVar
+from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from importlib.resources import files
+from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.utilities.tasks import TaskConfig
 
 from marvin_mcp.formats import FORMAT_GUIDE
+from marvin_mcp.tasks import ResponseTasks
 
 DEFAULT_API_URL = "https://app-api.marvin-labs.com"
 # What the access gate's 404 means: the account has no access to the API yet.
@@ -57,6 +63,91 @@ DEFAULT_WAIT_SECONDS = 50.0
 TOOL_TIMEOUT_SECONDS = 660.0
 POLL_SECONDS = 3.0
 UNFINISHED = ("queued", "in_progress")
+
+# What the research tools answer, as JSON Schema per tool: the response models of
+# the API's /v1/tools routes, generated from them into this file
+# (``bruce.api.marvin_mcp_schemas``), so the tools can declare an outputSchema
+# without depending on the Marvin codebase. A tool missing here answers a free-form
+# object.
+OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = json.loads(
+    files("marvin_mcp").joinpath("output_schemas.json").read_text()
+)
+
+
+# --- Output shapes ------------------------------------------------------------
+# The tools that shape their own answer declare it, so clients get an exact
+# outputSchema (and structuredContent that matches it).
+
+ResponseStatus = Literal["queued", "in_progress", "completed", "failed", "cancelled"]
+
+
+class Answer(TypedDict):
+    status: ResponseStatus
+    response_id: str
+    conversation_id: str | None
+    # Marvin's answer in markdown, once ``status`` is completed.
+    answer: NotRequired[str]
+    # What to do while ``status`` is queued or in_progress.
+    next_step: NotRequired[str]
+    # Why the answer failed, when it did.
+    error: NotRequired[str | None]
+
+
+class ConversationSummary(TypedDict):
+    conversation_id: str
+    title: str | None
+    # Unix seconds.
+    updated_at: int | None
+    # Tickers, or names where a company has none.
+    companies: list[str]
+
+
+class ConversationPage(TypedDict):
+    conversations: list[ConversationSummary]
+    next_cursor: str | None
+
+
+class Message(TypedDict):
+    role: Literal["user", "assistant"]
+    text: str
+
+
+class Transcript(TypedDict):
+    conversation_id: str
+    title: str | None
+    messages: list[Message]
+    next_cursor: str | None
+
+
+AgentStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+
+
+class AgentResultSummary(TypedDict):
+    agent_result_id: str
+    title: str | None
+    agent: str | None
+    status: AgentStatus
+    # Unix seconds.
+    created_at: int | None
+    companies: list[str]
+    abstract: str | None
+
+
+class AgentResultPage(TypedDict):
+    agent_results: list[AgentResultSummary]
+    next_cursor: str | None
+
+
+class AgentReport(TypedDict):
+    agent_result_id: str
+    title: str | None
+    agent: str | None
+    status: AgentStatus
+    companies: list[str]
+    # The report in markdown.
+    report: str | None
+    next_step: NotRequired[str]
+    note: NotRequired[str]
 
 # Tool annotations (MCP ``ToolAnnotations``): Claude runs read-only tools without
 # asking each time and always asks before destructive ones; ChatGPT treats a
@@ -180,6 +271,14 @@ def _wait_seconds() -> float:
     return float(os.environ.get("MARVIN_WAIT_SECONDS", DEFAULT_WAIT_SECONDS))
 
 
+class MarvinAPIError(RuntimeError):
+    """The API refused a request; ``status_code`` is its HTTP status."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     async with _client() as client:
         response = await client.request(method, path, **kwargs)
@@ -195,7 +294,7 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         # response or conversation names what it could not find.
         if response.status_code == 404 and message == "Not Found":
             detail += f" ({ACCESS_MESSAGE})"
-        raise RuntimeError(f"Marvin API {response.status_code}: {detail}")
+        raise MarvinAPIError(f"Marvin API {response.status_code}: {detail}", response.status_code)
     body = response.json()
     # A long /v1/tools call answers 200 before it is done, so an error after
     # that arrives as the error envelope in the 200 body.
@@ -205,9 +304,9 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     return body
 
 
-def _summary(response: dict[str, Any]) -> dict[str, Any]:
+def _summary(response: dict[str, Any]) -> Answer:
     """What a model needs from a response object."""
-    summary: dict[str, Any] = {
+    summary: Answer = {
         "status": response["status"],
         "response_id": response["id"],
         "conversation_id": (response.get("conversation") or {}).get("id"),
@@ -221,16 +320,46 @@ def _summary(response: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
-async def _wait(response: dict[str, Any], wait_seconds: float) -> dict[str, Any]:
-    deadline = time.monotonic() + max(0.0, wait_seconds)
+async def _wait(response: dict[str, Any], wait_seconds: float, ctx: Context) -> dict[str, Any]:
+    """Poll *response* until it is done or *wait_seconds* have passed.
+
+    Each poll reports progress (seconds waited so far, no total: the API cannot say
+    how long an answer takes) to a client that asked for it with a progress token,
+    so it can show that Marvin is still working. FastMCP sends nothing otherwise.
+    """
+    started = time.monotonic()
+    deadline = started + max(0.0, wait_seconds)
     while response["status"] in UNFINISHED and time.monotonic() < deadline:
         await asyncio.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
         response = await _request("GET", f"/responses/{response['id']}")
+        if response["status"] in UNFINISHED:
+            # Unrounded: MCP progress must increase with every notification.
+            await ctx.report_progress(
+                time.monotonic() - started, message=f"Marvin is working ({response['status']})"
+            )
     return response
 
 
-@mcp.tool(title="Ask Marvin", annotations=WRITE)
-async def ask_marvin(question: str, conversation_id: str | None = None) -> dict[str, Any]:
+async def _start_answer(question: str, conversation_id: str | None) -> dict[str, Any]:
+    """Start a turn in the background; returns the response object."""
+    body: dict[str, Any] = {"model": "marvin", "input": question, "background": True}
+    if conversation_id:
+        body["conversation"] = conversation_id
+    return await _request("POST", "/responses", json=body)
+
+
+# A client on protocol 2026-07-28 that declares the tasks extension (Claude
+# Code) gets ask_marvin as an MCP task: the call returns at once with the
+# response id as the task id, and the client polls tasks/get (marvin_mcp.tasks).
+# Every other client gets the plain tool below.
+@mcp.tool(
+    title="Ask Marvin",
+    annotations=WRITE,
+    task=TaskConfig(mode="optional", poll_interval=timedelta(seconds=POLL_SECONDS)),
+)
+async def ask_marvin(
+    question: str, ctx: Context, conversation_id: str | None = None
+) -> Answer:
     """Ask Marvin a question; returns its answer, or a response_id to poll.
 
     Args:
@@ -238,26 +367,23 @@ async def ask_marvin(question: str, conversation_id: str | None = None) -> dict[
         conversation_id: Continue this conversation (the conversation_id of an earlier
             answer, or one from list_conversations). Omit to start a new one.
     """
-    body: dict[str, Any] = {"model": "marvin", "input": question, "background": True}
-    if conversation_id:
-        body["conversation"] = conversation_id
-    started = await _request("POST", "/responses", json=body)
-    return _summary(await _wait(started, _wait_seconds()))
+    started = await _start_answer(question, conversation_id)
+    return _summary(await _wait(started, _wait_seconds(), ctx))
 
 
 @mcp.tool(title="Get Marvin's answer", annotations=READ)
-async def get_response(response_id: str) -> dict[str, Any]:
+async def get_response(response_id: str, ctx: Context) -> Answer:
     """Wait a little longer for an answer that ask_marvin left running.
 
     Args:
         response_id: The response_id ask_marvin returned.
     """
     current = await _request("GET", f"/responses/{response_id}")
-    return _summary(await _wait(current, _wait_seconds()))
+    return _summary(await _wait(current, _wait_seconds(), ctx))
 
 
 @mcp.tool(title="Cancel a running answer", annotations=CANCEL)
-async def cancel_response(response_id: str) -> dict[str, Any]:
+async def cancel_response(response_id: str) -> Answer:
     """Stop an answer that is still running.
 
     Args:
@@ -269,8 +395,55 @@ async def cancel_response(response_id: str) -> dict[str, Any]:
     return summary
 
 
+# --- ask_marvin as an MCP task ---------------------------------------------
+
+
+async def _task_start(arguments: dict[str, Any]) -> dict[str, Any]:
+    # A tasked call skips the tool body, and with it FastMCP's argument checks.
+    question = arguments.get("question")
+    conversation_id = arguments.get("conversation_id")
+    if not isinstance(question, str) or not question.strip():
+        raise ToolError("ask_marvin needs a `question`.")
+    if conversation_id is not None and not isinstance(conversation_id, str):
+        raise ToolError("`conversation_id` must be a string.")
+    return await _start_answer(question, conversation_id)
+
+
+async def _task_request(method: str, path: str) -> dict[str, Any] | None:
+    """A tasks/* request on behalf of ask_marvin; ``None`` for an unknown response."""
+    token = _current_tool.set("ask_marvin")
+    try:
+        return await _request(method, path)
+    except MarvinAPIError as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+    finally:
+        _current_tool.reset(token)
+
+
+async def _task_fetch(response_id: str) -> dict[str, Any] | None:
+    return await _task_request("GET", f"/responses/{response_id}")
+
+
+async def _task_cancel(response_id: str) -> dict[str, Any] | None:
+    return await _task_request("POST", f"/responses/{response_id}/cancel")
+
+
+mcp.add_extension(
+    ResponseTasks(
+        tool="ask_marvin",
+        start=_task_start,
+        fetch=_task_fetch,
+        cancel=_task_cancel,
+        summarize=_summary,
+        poll_interval_ms=int(POLL_SECONDS * 1000),
+    )
+)
+
+
 @mcp.tool(title="List conversations", annotations=READ)
-async def list_conversations(limit: int = 20, cursor: str | None = None) -> dict[str, Any]:
+async def list_conversations(limit: int = 20, cursor: str | None = None) -> ConversationPage:
     """Your Marvin conversations, most recently updated first, including ones from the app.
 
     Args:
@@ -298,7 +471,7 @@ async def list_conversations(limit: int = 20, cursor: str | None = None) -> dict
 @mcp.tool(title="Read a conversation", annotations=READ)
 async def get_conversation(
     conversation_id: str, limit: int = 20, cursor: str | None = None
-) -> dict[str, Any]:
+) -> Transcript:
     """A conversation's questions and answers, oldest first.
 
     Args:
@@ -329,7 +502,7 @@ async def list_agent_results(
     mine: bool = False,
     limit: int = 20,
     cursor: str | None = None,
-) -> dict[str, Any]:
+) -> AgentResultPage:
     """Reports Marvin's research agents have written that you can read, newest first.
 
     Includes your own runs, reports shared with you, and public ones. Read one with
@@ -370,14 +543,14 @@ async def list_agent_results(
 
 
 @mcp.tool(title="Read a research report", annotations=READ)
-async def get_agent_result(agent_result_id: str) -> dict[str, Any]:
+async def get_agent_result(agent_result_id: str) -> AgentReport:
     """One research agent report, with its full text in markdown.
 
     Args:
         agent_result_id: From list_agent_results.
     """
     result = await _request("GET", f"/agent_results/{agent_result_id}")
-    summary: dict[str, Any] = {
+    summary: AgentReport = {
         "agent_result_id": result["id"],
         "title": result.get("title"),
         "agent": result.get("agent"),
@@ -412,7 +585,9 @@ async def _tool(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return await _request("POST", f"/tools/{path}", json=payload, timeout=TOOL_TIMEOUT_SECONDS)
 
 
-@mcp.tool(title="List a company's documents", annotations=READ)
+@mcp.tool(
+    title="List a company's documents", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("list_documents", ...)
+)
 async def list_documents(
     company: str,
     document_type: list[str] | None = None,
@@ -452,7 +627,9 @@ async def list_documents(
     )
 
 
-@mcp.tool(title="Search a company's documents", annotations=READ)
+@mcp.tool(
+    title="Search a company's documents", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("search_documents", ...)
+)
 async def search_documents(
     company: str,
     query: str,
@@ -496,7 +673,9 @@ async def search_documents(
     )
 
 
-@mcp.tool(title="Read a document", annotations=READ)
+@mcp.tool(
+    title="Read a document", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("read_document", ...)
+)
 async def read_document(
     document_id: str,
     section: str | None = None,
@@ -529,7 +708,9 @@ async def read_document(
     )
 
 
-@mcp.tool(title="Explore a document", annotations=READ)
+@mcp.tool(
+    title="Explore a document", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("explore_document", ...)
+)
 async def explore_document(
     company: str, document_id: str, question: str, section: str | None = None
 ) -> dict[str, Any]:
@@ -555,7 +736,9 @@ async def explore_document(
     )
 
 
-@mcp.tool(title="Query financial figures", annotations=READ)
+@mcp.tool(
+    title="Query financial figures", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("query_financials", ...)
+)
 async def query_financials(
     company: str, queries: list[str], bias: str | None = None
 ) -> dict[str, Any]:
@@ -582,7 +765,9 @@ async def query_financials(
     )
 
 
-@mcp.tool(title="Get financial statements", annotations=READ)
+@mcp.tool(
+    title="Get financial statements", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("get_financial_statements", ...)
+)
 async def get_financial_statements(
     company: str, statement: str | None = None, periods: list[str] | None = None
 ) -> dict[str, Any]:
@@ -606,7 +791,9 @@ async def get_financial_statements(
     )
 
 
-@mcp.tool(title="Trace a financial figure to its source", annotations=READ)
+@mcp.tool(
+    title="Trace a financial figure to its source", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("get_financial_provenance", ...)
+)
 async def get_financial_provenance(
     company: str, datapoints: list[str | dict[str, Any]]
 ) -> dict[str, Any]:

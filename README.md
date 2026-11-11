@@ -84,7 +84,7 @@ Document ids such as `fd:k7qm2xp` stay valid, so you can keep them and pass them
 
 Every answer is a normal Marvin chat turn and uses your credits the same way. `search_documents`, `explore_document` and `query_financials` also use credits.
 
-**Long answers.** An answer often takes a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for up to 50 seconds. If the answer isn't ready by then, the model calls `get_response` until it is.
+**Long answers.** An answer often takes a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for up to 50 seconds, reporting progress while it waits. If the answer isn't ready by then, the model calls `get_response` until it is. Clients that support MCP tasks (protocol 2026-07-28, such as Claude Code) get `ask_marvin` as a task instead: the call returns at once and the client collects the answer when it is done.
 
 **Tables and charts.** Answers can contain tables and charts, written as JSON in ```` ```financial-table ```` and ```` ```echarts ```` blocks that the Marvin app renders. `get_format_guide` explains how to turn them into markdown tables, or into charts if the client can draw them.
 
