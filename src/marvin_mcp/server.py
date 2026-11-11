@@ -920,7 +920,9 @@ async def get_financial_statements(
         statement: A statement id from the list, e.g. "common:income_statement" or
             "as_reported:balance_sheet". Omit for the list.
         periods: Reporting periods, e.g. ["FY-2023", "FY-2024"] or ["2Q-2025"].
-            Omit for the last five fiscal years.
+            Omit for the last five fiscal years and the last four quarters
+            (two halves for a half-year reporter). Each column gives the
+            calendar days it covers (`start`, `end`).
     """
     return await _tool(
         "financials/statements",
