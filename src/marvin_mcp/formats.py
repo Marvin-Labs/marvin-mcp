@@ -8,6 +8,37 @@ than repeating it in every answer.
 
 from __future__ import annotations
 
+import json
+import re
+from typing import Any
+
+# A fenced ```financial-table or ```echarts block: its language and JSON body.
+_FIGURE_RE = re.compile(
+    r"^ {0,3}(?P<fence>`{3,}|~{3,})[ \t]*(?P<kind>financial-table|echarts)[^\n]*\n"
+    r"(?P<spec>.*?)^ {0,3}(?P=fence)[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _title(spec: str) -> str | None:
+    """A table's `title` or a chart's `title.text`; None when the block has none."""
+    try:
+        parsed = json.loads(spec)
+    except ValueError:
+        return None
+    title = parsed.get("title") if isinstance(parsed, dict) else None
+    if isinstance(title, dict):
+        title = title.get("text")
+    return title if isinstance(title, str) else None
+
+
+def figures(text: str | None) -> list[dict[str, Any]]:
+    """Every table and chart block in *text*, in order: `kind`, `title` and `spec`."""
+    return [
+        {"kind": m["kind"], "title": _title(m["spec"]), "spec": m["spec"].strip()}
+        for m in _FIGURE_RE.finditer(text or "")
+    ]
+
 FORMAT_GUIDE = """\
 # Rendering Marvin's table and chart blocks
 
@@ -15,6 +46,15 @@ Marvin's answers are markdown. Tables and charts arrive as JSON inside fenced co
 blocks whose language is `financial-table` or `echarts`. Replace each block with a
 rendering the user can read, in place, keeping the text around it. Never change a
 number: the blocks hold raw values and only the formatting is yours to do.
+
+If your client shows MCP Apps (interactive views in the conversation), call
+`show_figure` for a block instead: it draws the table or chart exactly as the
+Marvin app does. The rest of this guide is for rendering a block yourself.
+
+Both kinds of block may carry `citations`, the documents the figures come from:
+`[{"number": 1, "url": "https://app.marvin-labs.com/r/...", "title": "10-K FY2024"}]`.
+Show them under the block as numbered links, "Sources: [1](url) [2](url)". The
+numbers are the same as the citations in the text around the block.
 
 ## ```financial-table
 

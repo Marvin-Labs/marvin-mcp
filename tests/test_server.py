@@ -332,3 +332,57 @@ async def test_requests_name_the_client_and_the_tool_that_made_them():
     assert sent["user-agent"].startswith("marvin-mcp/")
     assert "(hosted)" not in sent["user-agent"]
     assert sent[server.TOOL_HEADER] == "search_documents"
+
+
+TABLE = '{"title": "Revenue", "columns": [], "rows": []}'
+CHART = '{"title": {"text": "Margins"}, "series": []}'
+ANSWER = f"Up.\n\n```financial-table\n{TABLE}\n```\n\nAnd:\n\n```echarts\n{CHART}\n```\n"
+
+
+@respx.mock
+async def test_an_answers_figures_are_listed_and_show_figure_draws_the_one_asked_for():
+    respx.get(f"{API}/responses/resp_1").mock(
+        return_value=httpx.Response(200, json=_response("completed", ANSWER))
+    )
+
+    async with Client(server.mcp) as client:
+        answer = await client.call_tool("get_response", {"response_id": "resp_1"})
+        shown = await client.call_tool("show_figure", {"index": 1, "response_id": "resp_1"})
+
+    assert answer.structured_content["figures"] == [
+        {"index": 0, "kind": "financial-table", "title": "Revenue"},
+        {"index": 1, "kind": "echarts", "title": "Margins"},
+    ]
+    assert shown.structured_content == {"kind": "echarts", "spec": CHART}
+    assert 'chart "Margins"' in shown.content[0].text
+
+
+async def test_the_figure_view_loads_the_configured_apps_script_and_allows_its_origin(
+    monkeypatch,
+):
+    monkeypatch.setattr(server, "_app_base_url", None)
+    monkeypatch.setitem(server._FIGURE_VIEW_UI["csp"], "resourceDomains", ["x"])
+    server.configure_api("https://marvin.test", app_url="https://stg-app.test/")
+    try:
+        async with Client(server.mcp) as client:
+            tools = {t.name: t for t in await client.list_tools()}
+            resources = {str(r.uri): r for r in await client.list_resources()}
+            page = await client.read_resource(server.FIGURE_VIEW_URI)
+    finally:
+        monkeypatch.setattr(server, "_api_base_url", None)
+
+    assert tools["show_figure"].meta["ui"]["resourceUri"] == server.FIGURE_VIEW_URI
+    view = resources[server.FIGURE_VIEW_URI]
+    assert view.mime_type == "text/html;profile=mcp-app"
+    assert view.meta["ui"]["csp"]["resourceDomains"] == ["https://stg-app.test"]
+    assert 'src="https://stg-app.test/static/figures/mcp-app-v1.js"' in page[0].text
+
+
+@respx.mock
+async def test_show_figure_says_when_an_answer_has_no_figures():
+    respx.get(f"{API}/responses/resp_1").mock(
+        return_value=httpx.Response(200, json=_response("in_progress"))
+    )
+
+    with pytest.raises(ValueError, match="has no tables or charts"):
+        await server.show_figure(0, response_id="resp_1")

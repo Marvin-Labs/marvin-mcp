@@ -66,6 +66,7 @@ Any MCP client that connects to remote servers over Streamable HTTP with OAuth w
 | `get_conversation(conversation_id, limit?, cursor?)` | A conversation's questions and answers |
 | `list_agent_results(company?, agent?, mine?, limit?, cursor?)` | Reports by Marvin's research agents that you can read: yours, ones shared with you, and public ones |
 | `get_agent_result(agent_result_id)` | One report, in full |
+| `show_figure(index, response_id? \| agent_result_id?)` | Shows one table or chart of an answer or report in the conversation, as the Marvin app draws it (clients that show MCP Apps) |
 | `get_format_guide()` | How to show the table and chart blocks in answers |
 
 To research a company yourself instead of asking Marvin, use the same tools Marvin's analysts use. Each one answers in a single call, outside any conversation:
@@ -86,7 +87,7 @@ Every answer is a normal Marvin chat turn and uses your credits the same way. `s
 
 **Long answers.** An answer often takes a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for up to 50 seconds, reporting progress while it waits. If the answer isn't ready by then, the model calls `get_response` until it is. Clients that support MCP tasks (protocol 2026-07-28, such as Claude Code) get `ask_marvin` as a task instead: the call returns at once and the client collects the answer when it is done.
 
-**Tables and charts.** Answers can contain tables and charts, written as JSON in ```` ```financial-table ```` and ```` ```echarts ```` blocks that the Marvin app renders. `get_format_guide` explains how to turn them into markdown tables, or into charts if the client can draw them.
+**Tables and charts.** Answers can contain tables and charts, written as JSON in ```` ```financial-table ```` and ```` ```echarts ```` blocks that the Marvin app renders. An answer lists them under `figures`. In Claude (web, desktop and mobile) and ChatGPT, the model calls `show_figure` and the table or chart appears in the conversation with its sources, drawn by the Marvin app's own renderer. Elsewhere, `get_format_guide` explains how to turn the blocks into markdown tables, or into charts if the client can draw them.
 
 **Client identification.** Each request to the Marvin API sends `User-Agent: marvin-mcp/<version>` and the name of the tool that made it (`X-Marvin-Client-Tool`), so Marvin can see which tools are used. The server collects nothing else and sends no telemetry of its own.
 
@@ -152,6 +153,7 @@ Claude Desktop on macOS does not see your shell's PATH, so give it the full path
 | `MARVIN_API_KEY` | (required) | Your Marvin API key |
 | `MARVIN_API_URL` | `https://app-api.marvin-labs.com` | Another environment, such as stg or a local API (`http://localhost:<port>`) |
 | `MARVIN_WAIT_SECONDS` | `50` | How long one `ask_marvin` or `get_response` call waits for an answer |
+| `MARVIN_APP_URL` | `https://app.marvin-labs.com` | The Marvin app that draws `show_figure`'s tables and charts |
 
 ## Development
 

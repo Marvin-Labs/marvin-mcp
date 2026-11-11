@@ -27,6 +27,14 @@ Configuration (environment):
   example to stg or a local API).
 - ``MARVIN_WAIT_SECONDS``: optional, how long one tool call waits for an
   answer (default 50).
+- ``MARVIN_APP_URL``: optional; the Marvin app that serves the table and chart
+  view (``show_figure``), production unless set.
+
+``show_figure`` is an MCP App: in a client that renders apps (Claude, ChatGPT)
+its result shows one table or chart of an answer as the Marvin app draws it.
+The view is the ``ui://marvin/figure`` page, which only loads a script the app
+serves (``/static/figures/mcp-app-v1.js``, built in the bridget repo from the
+app's own components), so the server ships no frontend code of its own.
 """
 
 from __future__ import annotations
@@ -44,15 +52,18 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx
 from fastmcp import Context, FastMCP
+from fastmcp.apps import AppConfig
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.tools import ToolResult
 from fastmcp.utilities.tasks import TaskConfig
 
-from marvin_mcp.formats import FORMAT_GUIDE
+from marvin_mcp.formats import FORMAT_GUIDE, figures
 from marvin_mcp.tasks import ResponseTasks
 
 DEFAULT_API_URL = "https://app-api.marvin-labs.com"
+DEFAULT_APP_URL = "https://app.marvin-labs.com"
 # What the access gate's 404 means: the account has no access to the API yet.
 ACCESS_MESSAGE = (
     "This is a private alpha version. Please email marvin@marvin-labs.com for access."
@@ -81,6 +92,13 @@ OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = json.loads(
 ResponseStatus = Literal["queued", "in_progress", "completed", "failed", "cancelled"]
 
 
+class Figure(TypedDict):
+    # What ``show_figure`` takes to draw it.
+    index: int
+    kind: Literal["financial-table", "echarts"]
+    title: str | None
+
+
 class Answer(TypedDict):
     status: ResponseStatus
     response_id: str
@@ -91,6 +109,8 @@ class Answer(TypedDict):
     next_step: NotRequired[str]
     # Why the answer failed, when it did.
     error: NotRequired[str | None]
+    # The answer's tables and charts, for show_figure.
+    figures: NotRequired[list[Figure]]
 
 
 class ConversationSummary(TypedDict):
@@ -148,6 +168,8 @@ class AgentReport(TypedDict):
     report: str | None
     next_step: NotRequired[str]
     note: NotRequired[str]
+    # The report's tables and charts, for show_figure.
+    figures: NotRequired[list[Figure]]
 
 # Tool annotations (MCP ``ToolAnnotations``): Claude runs read-only tools without
 # asking each time and always asks before destructive ones; ChatGPT treats a
@@ -181,9 +203,11 @@ mcp = FastMCP(
         "response_id until it is completed. To follow up in the same conversation, pass the "
         "conversation_id from the previous answer. For reports Marvin's research agents have "
         "already written (earnings call summaries and the like), use list_agent_results and "
-        "get_agent_result. If an answer or report has ```financial-table or "
-        "```echarts blocks, call get_format_guide for an explanation of their format "
-        "conventions. To research yourself instead of asking Marvin, use the document tools "
+        "get_agent_result. An answer or report lists its tables and charts under "
+        "`figures`: if your client shows MCP Apps, call show_figure for each one you "
+        "present, where it belongs in your reply, instead of rewriting it; otherwise "
+        "call get_format_guide for how to render the ```financial-table and "
+        "```echarts blocks yourself. To research yourself instead of asking Marvin, use the document tools "
         "(list_documents, search_documents, read_document, explore_document) and the "
         "financials tools (query_financials, get_financial_statements, "
         "get_financial_provenance). Cite figures with the `fd:` document ids they return; "
@@ -225,14 +249,38 @@ _api_base_url: str | None = None
 _api_transport: httpx.AsyncBaseTransport | None = None
 
 
-def configure_api(base_url: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
+_app_base_url: str | None = None
+
+
+def _app_url() -> str:
+    return (_app_base_url or os.environ.get("MARVIN_APP_URL", DEFAULT_APP_URL)).rstrip("/")
+
+
+# The figure view's ``_meta.ui``. Owned here rather than built by ``AppConfig``
+# so ``configure_api`` can point its CSP at another app after registration.
+_FIGURE_VIEW_UI: dict[str, Any] = {
+    "csp": {"resourceDomains": [_app_url()]},
+    "prefersBorder": False,
+}
+
+
+def configure_api(
+    base_url: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+    app_url: str | None = None,
+) -> None:
     """Point the tools at ``base_url`` (and optionally a transport), not the environment.
 
     For hosting the server inside the API itself, where requests go in-process.
+    *app_url* is the Marvin app whose figures script the table and chart view
+    loads, for an API that is not production's.
     """
-    global _api_base_url, _api_transport
+    global _api_base_url, _api_transport, _app_base_url
     _api_base_url = base_url
     _api_transport = transport
+    if app_url is not None:
+        _app_base_url = app_url
+        _FIGURE_VIEW_UI["csp"]["resourceDomains"][:] = [_app_url()]
 
 
 def _credential() -> str:
@@ -304,6 +352,14 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     return body
 
 
+def _figure_index(text: str | None) -> list[Figure]:
+    """The tables and charts in *text*, as ``show_figure`` numbers them."""
+    return [
+        {"index": i, "kind": figure["kind"], "title": figure["title"]}
+        for i, figure in enumerate(figures(text))
+    ]
+
+
 def _summary(response: dict[str, Any]) -> Answer:
     """What a model needs from a response object."""
     summary: Answer = {
@@ -313,6 +369,8 @@ def _summary(response: dict[str, Any]) -> Answer:
     }
     if response["status"] == "completed":
         summary["answer"] = response.get("output_text", "")
+        if index := _figure_index(summary["answer"]):
+            summary["figures"] = index
     elif response["status"] in UNFINISHED:
         summary["next_step"] = "Still working. Call get_response with this response_id."
     elif response.get("error"):
@@ -558,6 +616,8 @@ async def get_agent_result(agent_result_id: str) -> AgentReport:
         "companies": [co.get("ticker") or co.get("name") for co in result.get("companies", [])],
         "report": result.get("output_text"),
     }
+    if index := _figure_index(result.get("output_text")):
+        summary["figures"] = index
     if result["status"] in ("pending", "running") and not result.get("output_text"):
         summary["next_step"] = "The agent is still writing this report. Try again later."
     if result.get("newer_version_in_progress"):
@@ -574,6 +634,83 @@ def get_format_guide() -> str:
     markdown tables (or charts, if you can draw them).
     """
     return FORMAT_GUIDE
+
+
+FIGURE_VIEW_URI = "ui://marvin/figure"
+
+
+@mcp.resource(
+    FIGURE_VIEW_URI,
+    name="Marvin table or chart",
+    description="Draws one table or chart of a Marvin answer, as the Marvin app does.",
+    meta={"ui": _FIGURE_VIEW_UI},
+)
+def figure_view() -> str:
+    """The page the host frames for ``show_figure``: it only loads the app's script."""
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<style>html, body {{ margin: 0; background: transparent; }}</style>
+<script type="module" src="{_app_url()}/static/figures/mcp-app-v1.js"></script>
+</head>
+<body><div id="marvin-figure"></div></body>
+</html>
+"""
+
+
+# What the figure view reads from ``show_figure``'s structuredContent.
+FIGURE_VIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": ["financial-table", "echarts"]},
+        "spec": {"type": "string", "description": "The block's JSON, as Marvin wrote it."},
+    },
+    "required": ["kind", "spec"],
+}
+
+
+@mcp.tool(
+    title="Show a table or chart",
+    annotations=READ,
+    output_schema=FIGURE_VIEW_SCHEMA,
+    app=AppConfig(resource_uri=FIGURE_VIEW_URI),
+)
+async def show_figure(
+    index: int, response_id: str | None = None, agent_result_id: str | None = None
+) -> ToolResult:
+    """Show the user one table or chart of an answer or report, drawn as in the Marvin app.
+
+    Only in a client that shows MCP Apps; elsewhere render the block yourself (see
+    get_format_guide). Call it where the figure belongs in your reply, once per figure.
+
+    Args:
+        index: The figure's `index` from the answer's or report's `figures`.
+        response_id: The answer's response_id (from ask_marvin or get_response).
+        agent_result_id: The report's agent_result_id (from get_agent_result).
+    """
+    if (response_id is None) == (agent_result_id is None):
+        raise ValueError("Pass exactly one of response_id and agent_result_id.")
+    if response_id is not None:
+        text = (await _request("GET", f"/responses/{response_id}")).get("output_text")
+    else:
+        text = (await _request("GET", f"/agent_results/{agent_result_id}")).get("output_text")
+    found = figures(text)
+    if not found:
+        raise ValueError(
+            "This answer has no tables or charts (yet): check that it is completed "
+            "and that its `figures` list one."
+        )
+    if not 0 <= index < len(found):
+        raise ValueError(f"index must be between 0 and {len(found) - 1}; it has {len(found)}.")
+    figure = found[index]
+    noun = "chart" if figure["kind"] == "echarts" else "table"
+    title = f' "{figure["title"]}"' if figure["title"] else ""
+    return ToolResult(
+        content=f"Showing the {noun}{title} to the user. Do not repeat its figures.",
+        structured_content={"kind": figure["kind"], "spec": figure["spec"]},
+    )
 
 
 # --- Research tools (/v1/tools) ---------------------------------------------
