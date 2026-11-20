@@ -6,7 +6,6 @@ import respx
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from fastmcp_tasks.client import call_tool_task
-
 from marvin_mcp import server
 
 API = "https://marvin.test/v1"
@@ -48,7 +47,8 @@ async def test_ask_starts_in_the_background_and_waits_for_the_answer():
     # A handshake-era client (Claude desktop and web, ChatGPT): the plain tool.
     async with Client(server.mcp, mode="legacy") as client:
         result = await client.call_tool(
-            "ask_marvin", {"question": "What does Apple sell?", "conversation_id": "conv-1"}
+            "ask_marvin",
+            {"question": "What does Apple sell?", "conversation_id": "conv-1"},
         )
 
     # Through the protocol, so the client also checks the answer against the outputSchema.
@@ -66,16 +66,22 @@ async def test_ask_starts_in_the_background_and_waits_for_the_answer():
 
 @respx.mock
 async def test_an_answer_still_running_at_the_wait_cap_reports_progress_and_says_to_poll():
-    respx.post(f"{API}/responses").mock(return_value=httpx.Response(200, json=_response("queued")))
+    respx.post(f"{API}/responses").mock(
+        return_value=httpx.Response(200, json=_response("queued"))
+    )
     respx.get(f"{API}/responses/resp_1").mock(
         return_value=httpx.Response(200, json=_response("in_progress"))
     )
     progress: list[tuple[float, str | None]] = []
 
-    async def on_progress(value: float, total: float | None, message: str | None) -> None:
+    async def on_progress(
+        value: float, total: float | None, message: str | None
+    ) -> None:
         progress.append((value, message))
 
-    async with Client(server.mcp, mode="legacy", progress_handler=on_progress) as client:
+    async with Client(
+        server.mcp, mode="legacy", progress_handler=on_progress
+    ) as client:
         result = await client.call_tool("ask_marvin", {"question": "Long question"})
 
     answer = result.structured_content
@@ -85,7 +91,9 @@ async def test_an_answer_still_running_at_the_wait_cap_reports_progress_and_says
     # Seconds waited, strictly rising (MCP requires it), while the answer is running.
     values = [value for value, _ in progress]
     assert len(values) > 1
-    assert all(earlier < later for earlier, later in zip(values, values[1:]))
+    assert all(
+        earlier < later for earlier, later in zip(values, values[1:], strict=False)
+    )
     assert all(message == "Marvin is working (in_progress)" for _, message in progress)
 
 
@@ -105,7 +113,9 @@ async def test_a_tasks_client_gets_ask_marvin_as_a_task_on_the_response():
     )
 
     async with Client(server.mcp) as client:
-        task = await call_tool_task(client, "ask_marvin", {"question": "What does Apple sell?"})
+        task = await call_tool_task(
+            client, "ask_marvin", {"question": "What does Apple sell?"}
+        )
         assert task.task_id == "resp_1"
         assert (await task.status()).status == "working"
         result = await task.result()
@@ -133,7 +143,9 @@ async def test_a_tasks_client_gets_ask_marvin_as_a_task_on_the_response():
     ids=["failed", "not-found"],
 )
 async def test_a_task_whose_answer_failed_or_is_unknown_is_an_error(answer, expected):
-    respx.post(f"{API}/responses").mock(return_value=httpx.Response(200, json=_response("queued")))
+    respx.post(f"{API}/responses").mock(
+        return_value=httpx.Response(200, json=_response("queued"))
+    )
     respx.get(f"{API}/responses/resp_1").mock(return_value=answer)
 
     async with Client(server.mcp) as client:
@@ -144,7 +156,9 @@ async def test_a_task_whose_answer_failed_or_is_unknown_is_an_error(answer, expe
 
 @respx.mock
 async def test_cancelling_a_task_cancels_the_answer():
-    respx.post(f"{API}/responses").mock(return_value=httpx.Response(200, json=_response("queued")))
+    respx.post(f"{API}/responses").mock(
+        return_value=httpx.Response(200, json=_response("queued"))
+    )
     cancel = respx.post(f"{API}/responses/resp_1/cancel").mock(
         return_value=httpx.Response(200, json=_response("cancelled"))
     )
@@ -163,23 +177,16 @@ async def test_cancelling_a_task_cancels_the_answer():
 
 
 @respx.mock
-@pytest.mark.parametrize(
-    "message, expected",
-    [
-        ("Not Found", r"404: not_found: Not Found \(This is a private alpha.*marvin@marvin-labs.com"),
-        ("Response not found", r"404: not_found: Response not found$"),
-    ],
-    ids=["access-gate", "missing-response"],
-)
-async def test_only_the_access_gate_404_carries_the_access_hint(message, expected):
+async def test_a_404_reports_what_was_not_found():
     respx.get(f"{API}/responses/resp_1").mock(
-        return_value=httpx.Response(404, json={"error": {"code": "not_found", "message": message}})
+        return_value=httpx.Response(
+            404, json={"error": {"code": "not_found", "message": "Response not found"}}
+        )
     )
 
     async with Client(server.mcp) as client:
-        with pytest.raises(ToolError, match=expected):
+        with pytest.raises(ToolError, match=r"404: not_found: Response not found$"):
             await client.call_tool("get_response", {"response_id": "resp_1"})
-
 
 
 @respx.mock
@@ -232,7 +239,11 @@ async def test_list_agent_results_passes_the_filters_and_shapes_the_page():
     "status, text, expected_extra",
     [
         ("completed", "## Report", {}),
-        ("running", None, {"next_step": "The agent is still writing this report. Try again later."}),
+        (
+            "running",
+            None,
+            {"next_step": "The agent is still writing this report. Try again later."},
+        ),
     ],
 )
 async def test_get_agent_result_returns_the_report(status, text, expected_extra):
@@ -304,10 +315,14 @@ async def test_every_tool_declares_a_title_safety_hints_and_an_output_schema():
     for tool in tools:
         assert tool.title, tool.name
         assert tool.annotations is not None, tool.name
-        assert all(isinstance(getattr(tool.annotations, h), bool) for h in hints), tool.name
+        assert all(isinstance(getattr(tool.annotations, h), bool) for h in hints), (
+            tool.name
+        )
         assert tool.annotations.open_world_hint is False, tool.name
         # Every answer is a JSON object with a declared shape (structuredContent).
-        assert tool.output_schema is not None and tool.output_schema["type"] == "object", tool.name
+        assert (
+            tool.output_schema is not None and tool.output_schema["type"] == "object"
+        ), tool.name
     hinted = [(t.name, t.annotations) for t in tools if t.annotations is not None]
     writes = {name for name, hint in hinted if not hint.read_only_hint}
     destructive = {name for name, hint in hinted if hint.destructive_hint}
@@ -326,7 +341,9 @@ async def test_requests_name_the_client_and_the_tool_that_made_them():
     )
 
     async with Client(server.mcp) as client:
-        await client.call_tool("search_documents", {"company": "AAPL", "query": "services"})
+        await client.call_tool(
+            "search_documents", {"company": "AAPL", "query": "services"}
+        )
 
     sent = route.calls.last.request.headers
     assert sent["user-agent"].startswith("marvin-mcp/")
@@ -336,7 +353,9 @@ async def test_requests_name_the_client_and_the_tool_that_made_them():
 
 TABLE = '{"title": "Revenue", "columns": [], "rows": []}'
 CHART = '{"title": {"text": "Margins"}, "series": []}'
-ANSWER = f"Up.\n\n```financial-table\n{TABLE}\n```\n\nAnd:\n\n```echarts\n{CHART}\n```\n"
+ANSWER = (
+    f"Up.\n\n```financial-table\n{TABLE}\n```\n\nAnd:\n\n```echarts\n{CHART}\n```\n"
+)
 
 
 @respx.mock
@@ -347,7 +366,9 @@ async def test_an_answers_figures_are_listed_and_show_figure_draws_the_one_asked
 
     async with Client(server.mcp) as client:
         answer = await client.call_tool("get_response", {"response_id": "resp_1"})
-        shown = await client.call_tool("show_figure", {"index": 1, "response_id": "resp_1"})
+        shown = await client.call_tool(
+            "show_figure", {"index": 1, "response_id": "resp_1"}
+        )
 
     assert answer.structured_content["figures"] == [
         {"index": 0, "kind": "financial-table", "title": "Revenue"},

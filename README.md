@@ -1,13 +1,12 @@
 # Marvin MCP
 
-> [!IMPORTANT]
-> **Private alpha.** The Marvin MCP only works for accounts with alpha access. Email marvin@marvin-labs.com to request it. Tools, behaviour and setup may change without notice.
-
 Ask Marvin, Marvin Labs' equity research analyst, from Claude, ChatGPT, Claude Code or any other MCP client. Marvin Labs hosts the server, so there is nothing to install: add one URL to your client and sign in with your Marvin account.
 
 ```text
 https://app-api.marvin-labs.com/v1/mcp
 ```
+
+Setup for every client is also at [docs.marvin-labs.com/mcp](https://docs.marvin-labs.com/mcp/).
 
 The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
 
@@ -49,7 +48,7 @@ To use it, type `@Marvin` in a new conversation.
 claude mcp add --transport http marvin https://app-api.marvin-labs.com/v1/mcp
 ```
 
-Then run `/mcp` in Claude Code to sign in. To use an API key instead of signing in, add `--header "Authorization: Bearer ak_..."`. To create a key in the Marvin app, go to Account → API keys → Add new key.
+Then run `/mcp` in Claude Code to sign in. To use an API key instead of signing in, add `--header "Authorization: Bearer mk_live_..."`. To create a key in the Marvin app, go to Account → API keys; it belongs to you in the team you have selected.
 
 ### Other clients
 
@@ -83,7 +82,7 @@ To research a company yourself instead of asking Marvin, use the same tools Marv
 
 Document ids such as `fd:k7qm2xp` stay valid, so you can keep them and pass them back to `read_document`. The financials tools cite figures with the same ids.
 
-Every answer is a normal Marvin chat turn and uses your credits the same way. `search_documents`, `explore_document` and `query_financials` also use credits.
+Every answer is a normal Marvin chat turn and is billed to your organisation's wallet the same way. `search_documents`, `explore_document` and `query_financials` are billed $0.03 per successful call; see `GET /v1/pricing`.
 
 **Long answers.** An answer often takes a few minutes. MCP clients give up on a tool call long before that, so `ask_marvin` starts the answer in the background and waits for up to 50 seconds, reporting progress while it waits. If the answer isn't ready by then, the model calls `get_response` until it is. Clients that support MCP tasks (protocol 2026-07-28, such as Claude Code) get `ask_marvin` as a task instead: the call returns at once and the client collects the answer when it is done.
 
@@ -136,9 +135,9 @@ Any MCP client that starts local (stdio) servers works:
 For example:
 
 ```bash
-claude mcp add marvin --env MARVIN_API_KEY=ak_... \
+claude mcp add marvin --env MARVIN_API_KEY=mk_live_... \
   -- uvx --refresh --from "git+https://github.com/Marvin-Labs/marvin-mcp" marvin-mcp
-codex mcp add marvin --env MARVIN_API_KEY=ak_... \
+codex mcp add marvin --env MARVIN_API_KEY=mk_live_... \
   -- uvx --refresh --from "git+https://github.com/Marvin-Labs/marvin-mcp" marvin-mcp
 ```
 
@@ -159,7 +158,7 @@ Claude Desktop on macOS does not see your shell's PATH, so give it the full path
 
 ```bash
 uv run pytest
-MARVIN_API_KEY=ak_... MARVIN_API_URL=http://localhost:<port> uv run marvin-mcp   # stdio
+MARVIN_API_KEY=mk_live_... MARVIN_API_URL=http://localhost:<port> uv run marvin-mcp   # stdio
 ```
 
 To try a change in real clients before it is published, run setup from your checkout with `--source`. The clients then start the server from your checkout too. Add `--api-url` for stg or a local API.

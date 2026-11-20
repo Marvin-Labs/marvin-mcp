@@ -1,5 +1,58 @@
 {
   "explore_document": {
+    "$defs": {
+      "Usage": {
+        "description": "What a call was billed, and the wallet balance after it.\n\n``cost_usd`` equals the ledger rows booked for the call (for a retry\nunder the same ``Idempotency-Key``, the first request's); a failed call,\nor one whose booking failed, reports 0. ``balance_usd`` is read from the ledger, so it includes this\ncall's charges; it may be negative.",
+        "properties": {
+          "balance_usd": {
+            "title": "Balance Usd",
+            "type": "number"
+          },
+          "cached_input_tokens": {
+            "default": 0,
+            "title": "Cached Input Tokens",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "description": "Billed uncached input tokens.",
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_usd": {
+            "default": 0.0,
+            "title": "Llm Usd",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "description": "Billed output tokens, thinking included.",
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "retrieval_calls": {
+            "default": 0,
+            "title": "Retrieval Calls",
+            "type": "integer"
+          },
+          "retrieval_usd": {
+            "default": 0.0,
+            "title": "Retrieval Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cost_usd",
+          "balance_usd"
+        ],
+        "title": "Usage",
+        "type": "object"
+      }
+    },
     "properties": {
       "coverage": {
         "anyOf": [
@@ -115,6 +168,18 @@
       "title": {
         "title": "Title",
         "type": "string"
+      },
+      "usage": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Usage"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "What this call cost."
       }
     },
     "required": [
@@ -483,12 +548,63 @@
         "title": "Redirect",
         "type": "object"
       },
+      "Usage": {
+        "description": "What a call was billed, and the wallet balance after it.\n\n``cost_usd`` equals the ledger rows booked for the call (for a retry\nunder the same ``Idempotency-Key``, the first request's); a failed call,\nor one whose booking failed, reports 0. ``balance_usd`` is read from the ledger, so it includes this\ncall's charges; it may be negative.",
+        "properties": {
+          "balance_usd": {
+            "title": "Balance Usd",
+            "type": "number"
+          },
+          "cached_input_tokens": {
+            "default": 0,
+            "title": "Cached Input Tokens",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "description": "Billed uncached input tokens.",
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_usd": {
+            "default": 0.0,
+            "title": "Llm Usd",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "description": "Billed output tokens, thinking included.",
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "retrieval_calls": {
+            "default": 0,
+            "title": "Retrieval Calls",
+            "type": "integer"
+          },
+          "retrieval_usd": {
+            "default": 0.0,
+            "title": "Retrieval Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cost_usd",
+          "balance_usd"
+        ],
+        "title": "Usage",
+        "type": "object"
+      },
       "ValuePeriodPair": {
         "additionalProperties": true,
         "type": "object"
       }
     },
-    "description": "Final result of query_financials — one result per decomposed metric,\nthe queries redirected to another tool, and the periods the company has\nno data for at all.",
+    "description": "``query_financials``'s own result, plus what the call cost.",
     "properties": {
       "periods_without_data": {
         "description": "Requested periods the company has no financial data for at all; not repeated under missing.",
@@ -564,12 +680,24 @@
         },
         "title": "Unrecognised Periods",
         "type": "array"
+      },
+      "usage": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Usage"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "What this call cost."
       }
     },
     "required": [
       "results"
     ],
-    "title": "FinancialQueryResult",
+    "title": "QueryFinancialsResponse",
     "type": "object"
   },
   "read_document": {
@@ -894,6 +1022,57 @@
         ],
         "title": "SearchPassage",
         "type": "object"
+      },
+      "Usage": {
+        "description": "What a call was billed, and the wallet balance after it.\n\n``cost_usd`` equals the ledger rows booked for the call (for a retry\nunder the same ``Idempotency-Key``, the first request's); a failed call,\nor one whose booking failed, reports 0. ``balance_usd`` is read from the ledger, so it includes this\ncall's charges; it may be negative.",
+        "properties": {
+          "balance_usd": {
+            "title": "Balance Usd",
+            "type": "number"
+          },
+          "cached_input_tokens": {
+            "default": 0,
+            "title": "Cached Input Tokens",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "description": "Billed uncached input tokens.",
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_usd": {
+            "default": 0.0,
+            "title": "Llm Usd",
+            "type": "number"
+          },
+          "output_tokens": {
+            "default": 0,
+            "description": "Billed output tokens, thinking included.",
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "retrieval_calls": {
+            "default": 0,
+            "title": "Retrieval Calls",
+            "type": "integer"
+          },
+          "retrieval_usd": {
+            "default": 0.0,
+            "title": "Retrieval Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cost_usd",
+          "balance_usd"
+        ],
+        "title": "Usage",
+        "type": "object"
       }
     },
     "properties": {
@@ -916,6 +1095,18 @@
         "default": null,
         "description": "Why nothing matched, when nothing did.",
         "title": "Note"
+      },
+      "usage": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Usage"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "What this call cost."
       }
     },
     "required": [

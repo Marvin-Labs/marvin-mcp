@@ -39,7 +39,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from marvin_mcp.server import ACCESS_MESSAGE, DEFAULT_API_URL
+from marvin_mcp.server import DEFAULT_API_URL
 
 SERVER_NAME = "marvin"
 SOURCE = "git+https://github.com/Marvin-Labs/marvin-mcp"
@@ -80,10 +80,10 @@ def check_key(api_key: str, api_url: str) -> None:
         raise SetupError(f"Could not reach the Marvin API at {api_url}: {exc}") from exc
     if response.status_code == 401:
         raise SetupError("That API key was not accepted. Check it and try again.")
-    if response.status_code == 404:
-        raise SetupError(ACCESS_MESSAGE)
     if response.is_error:
-        raise SetupError(f"The Marvin API answered {response.status_code}; try again later.")
+        raise SetupError(
+            f"The Marvin API answered {response.status_code}; try again later."
+        )
 
 
 def write_private(path: Path, text: str) -> None:
@@ -109,7 +109,9 @@ def install_claude_code(server: Server, project: Path | None) -> str:
     # add-json takes the entry only as an argument, so the key is briefly on the command line, as
     # with Claude's own `claude mcp add --env`. It refuses an existing name: remove the old one first.
     removed = subprocess.run(
-        ["claude", "mcp", "remove", SERVER_NAME, "-s", scope], cwd=cwd, capture_output=True
+        ["claude", "mcp", "remove", SERVER_NAME, "-s", scope],
+        cwd=cwd,
+        capture_output=True,
     )
     entry = json.dumps({"type": "stdio", **server.as_dict()})
     try:
@@ -165,7 +167,9 @@ def write_codex_config(server: Server, config: Path) -> None:
 
     Written directly rather than through ``codex mcp add``, so the key is never on a command line.
     """
-    document = tomlkit.parse(config.read_text()) if config.exists() else tomlkit.document()
+    document = (
+        tomlkit.parse(config.read_text()) if config.exists() else tomlkit.document()
+    )
     servers = document.setdefault("mcp_servers", tomlkit.table(is_super_table=True))
     servers[SERVER_NAME] = server.as_dict()
     write_private(config, tomlkit.dumps(document))
@@ -237,14 +241,24 @@ def targets(project: Path | None) -> list[Target]:
         return found
     desktop = claude_desktop_config()
     if desktop:
-        found.append(Target("Claude Desktop", lambda s: install_claude_desktop(s, desktop)))
-    found.append(Target("ChatGPT desktop", chatgpt_instructions, default=False, instructions=True))
+        found.append(
+            Target("Claude Desktop", lambda s: install_claude_desktop(s, desktop))
+        )
+    found.append(
+        Target(
+            "ChatGPT desktop", chatgpt_instructions, default=False, instructions=True
+        )
+    )
     return found
 
 
-def pick(message: str, options: list[tuple[int, str]], checked: list[int]) -> list[int] | None:
+def pick(
+    message: str, options: list[tuple[int, str]], checked: list[int]
+) -> list[int] | None:
     """An inline multi-select under the prompt; ``None`` when cancelled."""
-    checkboxes = CheckboxList(values=options, default_values=checked, select_character="x")
+    checkboxes = CheckboxList(
+        values=options, default_values=checked, select_character="x"
+    )
     keys = KeyBindings()
 
     @keys.add("enter")
@@ -258,10 +272,14 @@ def pick(message: str, options: list[tuple[int, str]], checked: list[int]) -> li
     # The list binds enter to "toggle" on itself, which outranks app-level bindings; the
     # later bindings in a merge win, so enter confirms instead.
     control = checkboxes.control
-    control.key_bindings = merge_key_bindings([control.key_bindings or KeyBindings(), keys])
+    control.key_bindings = merge_key_bindings(
+        [control.key_bindings or KeyBindings(), keys]
+    )
 
     hint = Window(
-        FormattedTextControl([("class:hint", "  ↑/↓ move · space toggles · enter confirms")]),
+        FormattedTextControl(
+            [("class:hint", "  ↑/↓ move · space toggles · enter confirms")]
+        ),
         height=1,
     )
     body = HSplit([Window(FormattedTextControl(message), height=1), checkboxes, hint])
@@ -293,38 +311,68 @@ def run(argv: list[str], console: Console) -> int:
         "--global to every project plus Claude Desktop and ChatGPT.",
     )
     parser.add_argument(
-        "-g", "--global", dest="global_", action="store_true",
+        "-g",
+        "--global",
+        dest="global_",
+        action="store_true",
         help="Add it for all projects, and to Claude Desktop and ChatGPT desktop",
     )
-    parser.add_argument("--project", type=Path, default=Path.cwd(), help="Project directory (default: here)")
-    parser.add_argument("--api-url", default=os.environ.get("MARVIN_API_URL", DEFAULT_API_URL))
     parser.add_argument(
-        "--source", default=SOURCE,
+        "--project",
+        type=Path,
+        default=Path.cwd(),
+        help="Project directory (default: here)",
+    )
+    parser.add_argument(
+        "--api-url", default=os.environ.get("MARVIN_API_URL", DEFAULT_API_URL)
+    )
+    parser.add_argument(
+        "--source",
+        default=SOURCE,
         help="Where the clients install the server from: a git URL or a local checkout (for testing)",
     )
-    parser.add_argument("-y", "--yes", action="store_true", help="Set up every client found, no questions")
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Set up every client found, no questions",
+    )
     options = parser.parse_args(argv)
     project = None if options.global_ else options.project.resolve()
     interactive = sys.stdin.isatty() and not options.yes
 
-    where = "all your projects" if project is None else f"the project in [bold]{project}[/]"
-    console.print(Panel.fit(f"[bold]Marvin MCP setup[/]\nAdds Marvin to your AI clients for {where}."))
+    where = (
+        "all your projects" if project is None else f"the project in [bold]{project}[/]"
+    )
+    console.print(
+        Panel.fit(
+            f"[bold]Marvin MCP setup[/]\nAdds Marvin to your AI clients for {where}."
+        )
+    )
 
     api_key = os.environ.get("MARVIN_API_KEY", "")
     if not api_key and interactive:
         api_key = prompt("Marvin API key: ", is_password=True).strip()
     if not api_key:
-        raise SetupError("No API key given. Create one in the Marvin app under Account → API keys.")
+        raise SetupError(
+            "No API key given. Create one in the Marvin app under Account → API keys."
+        )
     with console.status("Checking your API key…"):
         check_key(api_key, options.api_url)
     console.print("[green]✓[/] API key works")
 
     found = targets(project)
-    missing = [name for cli, name in (("claude", "Claude Code"), ("codex", "Codex")) if not shutil.which(cli)]
+    missing = [
+        name
+        for cli, name in (("claude", "Claude Code"), ("codex", "Codex"))
+        if not shutil.which(cli)
+    ]
     if missing:
         console.print(f"[dim]Not found on your PATH: {', '.join(missing)}.[/]")
     if not found:
-        raise SetupError("Found neither Claude Code nor Codex. Install one, or run setup --global.")
+        raise SetupError(
+            "Found neither Claude Code nor Codex. Install one, or run setup --global."
+        )
     chosen = choose(found, interactive)
     if chosen is None:
         console.print("Cancelled; nothing changed.")

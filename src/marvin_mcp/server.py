@@ -64,10 +64,6 @@ from marvin_mcp.tasks import ResponseTasks
 
 DEFAULT_API_URL = "https://app-api.marvin-labs.com"
 DEFAULT_APP_URL = "https://app.marvin-labs.com"
-# What the access gate's 404 means: the account has no access to the API yet.
-ACCESS_MESSAGE = (
-    "This is a private alpha version. Please email marvin@marvin-labs.com for access."
-)
 DEFAULT_WAIT_SECONDS = 50.0
 # How long one research-tool call may take: the API's own longest tool limit
 # (a wide financials query) plus a margin.
@@ -171,6 +167,7 @@ class AgentReport(TypedDict):
     # The report's tables and charts, for show_figure.
     figures: NotRequired[list[Figure]]
 
+
 # Tool annotations (MCP ``ToolAnnotations``): Claude runs read-only tools without
 # asking each time and always asks before destructive ones; ChatGPT treats a
 # tool without readOnlyHint as a write that needs confirmation, and its app
@@ -253,7 +250,9 @@ _app_base_url: str | None = None
 
 
 def _app_url() -> str:
-    return (_app_base_url or os.environ.get("MARVIN_APP_URL", DEFAULT_APP_URL)).rstrip("/")
+    return (_app_base_url or os.environ.get("MARVIN_APP_URL", DEFAULT_APP_URL)).rstrip(
+        "/"
+    )
 
 
 # The figure view's ``_meta.ui``. Owned here rather than built by ``AppConfig``
@@ -338,15 +337,17 @@ async def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             detail = f"{error.get('code')}: {message}"
         except ValueError:
             detail = response.text[:300]
-        # The access gate answers every route with a bare "Not Found"; a missing
-        # response or conversation names what it could not find.
-        if response.status_code == 404 and message == "Not Found":
-            detail += f" ({ACCESS_MESSAGE})"
-        raise MarvinAPIError(f"Marvin API {response.status_code}: {detail}", response.status_code)
+        raise MarvinAPIError(
+            f"Marvin API {response.status_code}: {detail}", response.status_code
+        )
     body = response.json()
     # A long /v1/tools call answers 200 before it is done, so an error after
     # that arrives as the error envelope in the 200 body.
-    if isinstance(body, dict) and body.keys() == {"error"} and isinstance(body["error"], dict):
+    if (
+        isinstance(body, dict)
+        and body.keys() == {"error"}
+        and isinstance(body["error"], dict)
+    ):
         error = body["error"]
         raise RuntimeError(f"Marvin API: {error.get('code')}: {error.get('message')}")
     return body
@@ -378,7 +379,9 @@ def _summary(response: dict[str, Any]) -> Answer:
     return summary
 
 
-async def _wait(response: dict[str, Any], wait_seconds: float, ctx: Context) -> dict[str, Any]:
+async def _wait(
+    response: dict[str, Any], wait_seconds: float, ctx: Context
+) -> dict[str, Any]:
     """Poll *response* until it is done or *wait_seconds* have passed.
 
     Each poll reports progress (seconds waited so far, no total: the API cannot say
@@ -393,7 +396,8 @@ async def _wait(response: dict[str, Any], wait_seconds: float, ctx: Context) -> 
         if response["status"] in UNFINISHED:
             # Unrounded: MCP progress must increase with every notification.
             await ctx.report_progress(
-                time.monotonic() - started, message=f"Marvin is working ({response['status']})"
+                time.monotonic() - started,
+                message=f"Marvin is working ({response['status']})",
             )
     return response
 
@@ -449,7 +453,9 @@ async def cancel_response(response_id: str) -> Answer:
     """
     summary = _summary(await _request("POST", f"/responses/{response_id}/cancel"))
     if summary["status"] in UNFINISHED:
-        summary["next_step"] = "Stopping. Call get_response to confirm it was cancelled."
+        summary["next_step"] = (
+            "Stopping. Call get_response to confirm it was cancelled."
+        )
     return summary
 
 
@@ -501,7 +507,9 @@ mcp.add_extension(
 
 
 @mcp.tool(title="List conversations", annotations=READ)
-async def list_conversations(limit: int = 20, cursor: str | None = None) -> ConversationPage:
+async def list_conversations(
+    limit: int = 20, cursor: str | None = None
+) -> ConversationPage:
     """Your Marvin conversations, most recently updated first, including ones from the app.
 
     Args:
@@ -518,7 +526,9 @@ async def list_conversations(limit: int = 20, cursor: str | None = None) -> Conv
                 "conversation_id": c["id"],
                 "title": c.get("title"),
                 "updated_at": c.get("updated_at"),
-                "companies": [co.get("ticker") or co.get("name") for co in c.get("companies", [])],
+                "companies": [
+                    co.get("ticker") or co.get("name") for co in c.get("companies", [])
+                ],
             }
             for c in page["data"]
         ],
@@ -541,12 +551,17 @@ async def get_conversation(
     if cursor:
         params["cursor"] = cursor
     conversation = await _request("GET", f"/conversations/{conversation_id}")
-    items = await _request("GET", f"/conversations/{conversation_id}/items", params=params)
+    items = await _request(
+        "GET", f"/conversations/{conversation_id}/items", params=params
+    )
     return {
         "conversation_id": conversation["id"],
         "title": conversation.get("title"),
         "messages": [
-            {"role": item["role"], "text": "\n".join(part["text"] for part in item["content"])}
+            {
+                "role": item["role"],
+                "text": "\n".join(part["text"] for part in item["content"]),
+            }
             for item in items["data"]
         ],
         "next_cursor": items.get("next_cursor"),
@@ -591,7 +606,9 @@ async def list_agent_results(
                 "agent": r.get("agent"),
                 "status": r.get("status"),
                 "created_at": r.get("created_at"),
-                "companies": [co.get("ticker") or co.get("name") for co in r.get("companies", [])],
+                "companies": [
+                    co.get("ticker") or co.get("name") for co in r.get("companies", [])
+                ],
                 "abstract": r.get("abstract"),
             }
             for r in page["data"]
@@ -613,13 +630,17 @@ async def get_agent_result(agent_result_id: str) -> AgentReport:
         "title": result.get("title"),
         "agent": result.get("agent"),
         "status": result["status"],
-        "companies": [co.get("ticker") or co.get("name") for co in result.get("companies", [])],
+        "companies": [
+            co.get("ticker") or co.get("name") for co in result.get("companies", [])
+        ],
         "report": result.get("output_text"),
     }
     if index := _figure_index(result.get("output_text")):
         summary["figures"] = index
     if result["status"] in ("pending", "running") and not result.get("output_text"):
-        summary["next_step"] = "The agent is still writing this report. Try again later."
+        summary["next_step"] = (
+            "The agent is still writing this report. Try again later."
+        )
     if result.get("newer_version_in_progress"):
         summary["note"] = "A newer version is being written; this is the previous one."
     return summary
@@ -665,7 +686,10 @@ FIGURE_VIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "kind": {"type": "string", "enum": ["financial-table", "echarts"]},
-        "spec": {"type": "string", "description": "The block's JSON, as Marvin wrote it."},
+        "spec": {
+            "type": "string",
+            "description": "The block's JSON, as Marvin wrote it.",
+        },
     },
     "required": ["kind", "spec"],
 }
@@ -695,7 +719,9 @@ async def show_figure(
     if response_id is not None:
         text = (await _request("GET", f"/responses/{response_id}")).get("output_text")
     else:
-        text = (await _request("GET", f"/agent_results/{agent_result_id}")).get("output_text")
+        text = (await _request("GET", f"/agent_results/{agent_result_id}")).get(
+            "output_text"
+        )
     found = figures(text)
     if not found:
         raise ValueError(
@@ -703,7 +729,9 @@ async def show_figure(
             "and that its `figures` list one."
         )
     if not 0 <= index < len(found):
-        raise ValueError(f"index must be between 0 and {len(found) - 1}; it has {len(found)}.")
+        raise ValueError(
+            f"index must be between 0 and {len(found) - 1}; it has {len(found)}."
+        )
     figure = found[index]
     noun = "chart" if figure["kind"] == "echarts" else "table"
     title = f' "{figure["title"]}"' if figure["title"] else ""
@@ -719,11 +747,15 @@ async def show_figure(
 async def _tool(path: str, body: dict[str, Any]) -> dict[str, Any]:
     """POST a research tool's arguments, leaving out the ones not given."""
     payload = {key: value for key, value in body.items() if value is not None}
-    return await _request("POST", f"/tools/{path}", json=payload, timeout=TOOL_TIMEOUT_SECONDS)
+    return await _request(
+        "POST", f"/tools/{path}", json=payload, timeout=TOOL_TIMEOUT_SECONDS
+    )
 
 
 @mcp.tool(
-    title="List a company's documents", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("list_documents", ...)
+    title="List a company's documents",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("list_documents", ...),
 )
 async def list_documents(
     company: str,
@@ -765,7 +797,9 @@ async def list_documents(
 
 
 @mcp.tool(
-    title="Search a company's documents", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("search_documents", ...)
+    title="Search a company's documents",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("search_documents", ...),
 )
 async def search_documents(
     company: str,
@@ -811,7 +845,9 @@ async def search_documents(
 
 
 @mcp.tool(
-    title="Read a document", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("read_document", ...)
+    title="Read a document",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("read_document", ...),
 )
 async def read_document(
     document_id: str,
@@ -846,7 +882,9 @@ async def read_document(
 
 
 @mcp.tool(
-    title="Explore a document", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("explore_document", ...)
+    title="Explore a document",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("explore_document", ...),
 )
 async def explore_document(
     company: str, document_id: str, question: str, section: str | None = None
@@ -874,7 +912,9 @@ async def explore_document(
 
 
 @mcp.tool(
-    title="Query financial figures", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("query_financials", ...)
+    title="Query financial figures",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("query_financials", ...),
 )
 async def query_financials(
     company: str, queries: list[str], bias: str | None = None
@@ -903,7 +943,9 @@ async def query_financials(
 
 
 @mcp.tool(
-    title="Get financial statements", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("get_financial_statements", ...)
+    title="Get financial statements",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("get_financial_statements", ...),
 )
 async def get_financial_statements(
     company: str, statement: str | None = None, periods: list[str] | None = None
@@ -931,7 +973,9 @@ async def get_financial_statements(
 
 
 @mcp.tool(
-    title="Trace a financial figure to its source", annotations=READ, output_schema=OUTPUT_SCHEMAS.get("get_financial_provenance", ...)
+    title="Trace a financial figure to its source",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("get_financial_provenance", ...),
 )
 async def get_financial_provenance(
     company: str, datapoints: list[str | dict[str, Any]]
