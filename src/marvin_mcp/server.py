@@ -741,6 +741,69 @@ async def show_figure(
     )
 
 
+# --- Feedback (/v1/feedback) -----------------------------------------------
+
+# Sending feedback writes a new row each time: additive, not idempotent.
+FEEDBACK = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
+
+
+class FeedbackReceipt(TypedDict):
+    id: str
+    status: Literal["received"]
+
+
+def _client_name(ctx: Context) -> str | None:
+    """The MCP client's own name and version, from its initialize request."""
+    try:
+        params = ctx.session.client_params
+    except Exception:  # no session (a stateless request)
+        return None
+    info = params.client_info if params is not None else None
+    if info is None:
+        return None
+    return f"{info.name} {info.version}".strip()
+
+
+@mcp.tool(title="Send feedback to the Marvin team", annotations=FEEDBACK)
+async def send_marvin_feedback(
+    comment: str,
+    ctx: Context,
+    kind: Literal["general", "bug", "coverage_request", "response_rating"] = "general",
+    structured_data: dict[str, Any] | None = None,
+) -> FeedbackReceipt:
+    """Send the user's feedback about Marvin to the Marvin team.
+
+    Only when the user explicitly asks you to send feedback to Marvin (or to its
+    team). Never on your own initiative, for example because a tool failed or an
+    answer looked wrong: if you think something should be reported, ask the user
+    first. Send what the user said; do not add your own opinions.
+
+    Args:
+        comment: The user's feedback, in their own words as far as possible.
+        kind: general, bug (something is broken), coverage_request (companies,
+            documents or data Marvin should cover) or response_rating (about one
+            answer).
+        structured_data: Anything else that helps, as a JSON object: the
+            `conversation_id` and `response_id` the feedback is about, the companies
+            asked for (`{"companies": [{"name": ..., "ticker": ...}]}`), the tool and
+            arguments that misbehaved.
+    """
+    data = dict(structured_data or {})
+    if (client := _client_name(ctx)) is not None:
+        data.setdefault("mcp_client", client)
+    body = await _request(
+        "POST",
+        "/feedback",
+        json={"kind": kind, "comment": comment, "structured_data": data},
+    )
+    return {"id": body["id"], "status": "received"}
+
+
 # --- Research tools (/v1/tools) ---------------------------------------------
 
 

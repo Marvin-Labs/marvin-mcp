@@ -8,7 +8,7 @@ https://app-api.marvin-labs.com/v1/mcp
 
 Setup for every client is also at [docs.marvin-labs.com/mcp](https://docs.marvin-labs.com/mcp/).
 
-The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
+The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`, `/v1/feedback`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
 
 ## Connect
 
@@ -67,6 +67,7 @@ Any MCP client that connects to remote servers over Streamable HTTP with OAuth w
 | `get_agent_result(agent_result_id)` | One report, in full |
 | `show_figure(index, response_id? \| agent_result_id?)` | Shows one table or chart of an answer or report in the conversation, as the Marvin app draws it (clients that show MCP Apps) |
 | `get_format_guide()` | How to show the table and chart blocks in answers |
+| `send_marvin_feedback(comment, kind?, structured_data?)` | Sends your feedback to the Marvin team: a problem, a rating of an answer, or companies to cover. Only when you ask for it |
 
 To research a company yourself instead of asking Marvin, use the same tools Marvin's analysts use. Each one answers in a single call, outside any conversation:
 

@@ -293,6 +293,33 @@ async def test_a_research_tool_posts_only_the_arguments_given():
 
 
 @respx.mock
+async def test_send_marvin_feedback_posts_the_users_words_and_data():
+    route = respx.post(f"{API}/feedback").mock(
+        return_value=httpx.Response(
+            201, json={"id": "fb-1", "object": "feedback", "created_at": 1}
+        )
+    )
+
+    async with Client(server.mcp) as client:
+        result = await client.call_tool(
+            "send_marvin_feedback",
+            {
+                "comment": "Please cover Siemens",
+                "kind": "coverage_request",
+                "structured_data": {"companies": [{"name": "Siemens"}]},
+            },
+        )
+
+    body = json.loads(route.calls.last.request.content)
+    assert body["kind"] == "coverage_request"
+    assert body["comment"] == "Please cover Siemens"
+    assert body["structured_data"]["companies"] == [{"name": "Siemens"}]
+    # The MCP client's own name, from its initialize request, rides along.
+    assert body["structured_data"]["mcp_client"]
+    assert result.structured_content == {"id": "fb-1", "status": "received"}
+
+
+@respx.mock
 async def test_a_long_tool_call_that_fails_after_its_200_is_an_error():
     # The API answers a long call 200 before it is done, then sends the error envelope.
     respx.post(f"{API}/tools/documents/explore").mock(
@@ -326,7 +353,7 @@ async def test_every_tool_declares_a_title_safety_hints_and_an_output_schema():
     hinted = [(t.name, t.annotations) for t in tools if t.annotations is not None]
     writes = {name for name, hint in hinted if not hint.read_only_hint}
     destructive = {name for name, hint in hinted if hint.destructive_hint}
-    assert writes == {"ask_marvin", "cancel_response"}
+    assert writes == {"ask_marvin", "cancel_response", "send_marvin_feedback"}
     assert destructive == {"cancel_response"}
     # The research tools answer the API's own response models (output_schemas.json).
     search = next(t.output_schema for t in tools if t.name == "search_documents")
