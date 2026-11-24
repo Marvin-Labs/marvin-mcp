@@ -8,7 +8,7 @@ https://app-api.marvin-labs.com/v1/mcp
 
 Setup for every client is also at [docs.marvin-labs.com/mcp](https://docs.marvin-labs.com/mcp/).
 
-The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agents`, `/v1/agent_results`, `/v1/tools`, `/v1/feedback`, `/v1/me`, `/v1/wallet`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
+The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agents`, `/v1/agent_results`, `/v1/companies`, `/v1/tools`, `/v1/feedback`, `/v1/me`, `/v1/wallet`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
 
 ## Connect
 
