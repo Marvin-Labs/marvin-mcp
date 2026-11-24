@@ -8,7 +8,7 @@ https://app-api.marvin-labs.com/v1/mcp
 
 Setup for every client is also at [docs.marvin-labs.com/mcp](https://docs.marvin-labs.com/mcp/).
 
-The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agent_results`, `/v1/tools`, `/v1/feedback`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
+The server calls only the Marvin Labs public API (`/v1/responses`, `/v1/conversations`, `/v1/agents`, `/v1/agent_results`, `/v1/tools`, `/v1/feedback`, `/v1/me`, `/v1/wallet`), and it acts as you. Conversations you start here show up in the Marvin app, and you can continue app conversations from here.
 
 ## Connect
 
@@ -65,14 +65,20 @@ Any MCP client that connects to remote servers over Streamable HTTP with OAuth w
 | `get_conversation(conversation_id, limit?, cursor?)` | A conversation's questions and answers |
 | `list_agent_results(company?, agent?, mine?, limit?, cursor?)` | Reports by Marvin's research agents that you can read: yours, ones shared with you, and public ones |
 | `get_agent_result(agent_result_id)` | One report, in full |
+| `list_agents()` | The research agents you can start, with the arguments each takes |
+| `start_agent(agent, arguments?)` | Starts a research agent, which writes a new report and bills it like a run in the app. Returns at once with the `agent_result_id`; read the report later with `get_agent_result` |
+| `cancel_agent_run(agent_result_id)` | Stops a run you started |
 | `show_figure(index, response_id? \| agent_result_id?)` | Shows one table or chart of an answer or report in the conversation, as the Marvin app draws it (clients that show MCP Apps) |
 | `get_format_guide()` | How to show the table and chart blocks in answers |
+| `get_account()` | Who you're signed in as, your team and its plan, and how much credit the team has left |
 | `send_marvin_feedback(comment, kind?, structured_data?)` | Sends your feedback to the Marvin team: a problem, a rating of an answer, or companies to cover. Only when you ask for it |
 
 To research a company yourself instead of asking Marvin, use the same tools Marvin's analysts use. Each one answers in a single call, outside any conversation:
 
 | Tool | Does |
 |---|---|
+| `find_company(query, limit?)` | Companies matching a name, ticker or identifier (ISIN, CIK, a ticker on another exchange), best first |
+| `get_company(company)` | A company's name, sector and industry, and its related companies (competitors, partners, customers, suppliers) |
 | `list_documents(company, document_type?, period?, date_from?, date_to?, limit?, cursor?)` | A company's documents, newest first: filings, transcripts, press releases, Marvin's reports and your uploads |
 | `search_documents(company, query, terms?, n_results?, document_type?, period?, date_from?, date_to?)` | The passages in a company's documents that answer a question, best first |
 | `read_document(document_id, section?, query?, start_token_offset?, max_token_length?)` | A document by its id: whole, a window, or the text around a match |
@@ -81,7 +87,7 @@ To research a company yourself instead of asking Marvin, use the same tools Marv
 | `get_financial_statements(company, statement?, periods?)` | A whole statement, every line in order. Without `statement`, the list of statements |
 | `get_financial_provenance(company, datapoints)` | The document and line each figure came from, or a computed figure's inputs |
 
-Document ids such as `fd:k7qm2xp` stay valid, so you can keep them and pass them back to `read_document`. The financials tools cite figures with the same ids.
+Every tool that takes a `company` takes a ticker or company id; `find_company` gets one from a name. Document ids such as `fd:k7qm2xp` stay valid, so you can keep them and pass them back to `read_document`. The financials tools cite figures with the same ids.
 
 Every answer is a normal Marvin chat turn and is billed to your organisation's wallet the same way. `search_documents`, `explore_document` and `query_financials` are billed $0.03 per successful call; see `GET /v1/pricing`.
 

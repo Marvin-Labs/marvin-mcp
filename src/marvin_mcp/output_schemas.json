@@ -194,6 +194,241 @@
     "title": "ExploreDocumentResponse",
     "type": "object"
   },
+  "find_company": {
+    "$defs": {
+      "CompanyReference": {
+        "description": "A company, as a search result or a related company.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Industry"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sector"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CompanyReference",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "data": {
+        "items": {
+          "$ref": "#/$defs/CompanyReference"
+        },
+        "title": "Data",
+        "type": "array"
+      },
+      "has_more": {
+        "default": false,
+        "title": "Has More",
+        "type": "boolean"
+      },
+      "next_cursor": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Next Cursor"
+      },
+      "object": {
+        "default": "list",
+        "title": "Object",
+        "type": "string"
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "title": "ListResponseContainer[CompanyReference]",
+    "type": "object"
+  },
+  "get_company": {
+    "$defs": {
+      "CompanyReference": {
+        "description": "A company, as a search result or a related company.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Industry"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sector"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CompanyReference",
+        "type": "object"
+      },
+      "CompanyRelationships": {
+        "properties": {
+          "data": {
+            "description": "The most popular related companies first.",
+            "items": {
+              "$ref": "#/$defs/RelatedCompanyObject"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "description": "More than `data` holds: page through them all with `GET /v1/companies/{company}/relationships`.",
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "How many companies are related in all.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "has_more"
+        ],
+        "title": "CompanyRelationships",
+        "type": "object"
+      },
+      "RelatedCompanyObject": {
+        "description": "A company related to another, with every way the two are related.",
+        "properties": {
+          "company": {
+            "$ref": "#/$defs/CompanyReference"
+          },
+          "relationship_types": {
+            "items": {
+              "$ref": "#/$defs/RelationshipType"
+            },
+            "title": "Relationship Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "company",
+          "relationship_types"
+        ],
+        "title": "RelatedCompanyObject",
+        "type": "object"
+      },
+      "RelationshipType": {
+        "enum": [
+          "competitor",
+          "partner",
+          "customer",
+          "supplier"
+        ],
+        "title": "RelationshipType",
+        "type": "string"
+      }
+    },
+    "description": "A company's profile and its related companies.",
+    "properties": {
+      "id": {
+        "title": "Id",
+        "type": "string"
+      },
+      "industry": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Industry"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "relationships": {
+        "$ref": "#/$defs/CompanyRelationships"
+      },
+      "sector": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sector"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "relationships"
+    ],
+    "title": "CompanyObject",
+    "type": "object"
+  },
   "get_financial_provenance": {
     "additionalProperties": true,
     "type": "object"

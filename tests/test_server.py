@@ -275,6 +275,97 @@ async def test_get_agent_result_returns_the_report(status, text, expected_extra)
     }
 
 
+def _agent_result(status: str) -> dict:
+    return {
+        "id": "ar-1",
+        "title": None,
+        "agent": "tariff_impact",
+        "status": status,
+        "companies": [{"id": "c-1", "name": "Apple", "ticker": "AAPL"}],
+        "output_text": None,
+    }
+
+
+@respx.mock
+async def test_list_agents_shapes_the_catalogue():
+    respx.get(f"{API}/agents").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "has_more": False,
+                "data": [
+                    {
+                        "id": "tariff_impact",
+                        "object": "agent",
+                        "name": "Tariff Impact",
+                        "description": "How tariffs hit the business.",
+                        "category": "standard",
+                        "custom": False,
+                        "company_scope": "single",
+                        "arguments": [
+                            {
+                                "id": "company_id",
+                                "name": "Company",
+                                "type": "company",
+                                "description": "A ticker or company id.",
+                                "required": True,
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+    )
+
+    assert await server.list_agents() == {
+        "agents": [
+            {
+                "agent": "tariff_impact",
+                "name": "Tariff Impact",
+                "description": "How tariffs hit the business.",
+                "category": "standard",
+                "custom": False,
+                "arguments": [
+                    {
+                        "id": "company_id",
+                        "type": "company",
+                        "description": "A ticker or company id.",
+                        "required": True,
+                    }
+                ],
+            }
+        ]
+    }
+
+
+@respx.mock
+async def test_start_agent_returns_at_once_and_cancel_stops_it():
+    started = respx.post(f"{API}/agent_results").mock(
+        return_value=httpx.Response(200, json=_agent_result("pending"))
+    )
+    respx.post(f"{API}/agent_results/ar-1/cancel").mock(
+        return_value=httpx.Response(200, json=_agent_result("cancelled"))
+    )
+
+    run = await server.start_agent("tariff_impact", {"company_id": "AAPL"})
+    stopped = await server.cancel_agent_run("ar-1")
+
+    assert json.loads(started.calls.last.request.content) == {
+        "agent": "tariff_impact",
+        "arguments": {"company_id": "AAPL"},
+    }
+    assert run["status"] == "pending"
+    assert "get_agent_result" in run["next_step"]
+    assert stopped == {
+        "agent_result_id": "ar-1",
+        "title": None,
+        "agent": "tariff_impact",
+        "status": "cancelled",
+        "companies": ["AAPL"],
+    }
+
+
 @respx.mock
 async def test_a_research_tool_posts_only_the_arguments_given():
     # The API rejects an explicit null for a list argument such as `terms`.
@@ -290,6 +381,28 @@ async def test_a_research_tool_posts_only_the_arguments_given():
         "n_results": 10,
     }
     assert result == {"hits": []}
+
+
+@respx.mock
+async def test_the_company_tools_search_and_read_one_company():
+    search = respx.get(f"{API}/companies").mock(
+        return_value=httpx.Response(200, json={"object": "list", "data": []})
+    )
+    # A share-class ticker carries a slash: it must stay one path segment.
+    profile = respx.get(f"{API}/companies/BRK%2FB").mock(
+        return_value=httpx.Response(200, json={"id": "c-1", "name": "Berkshire"})
+    )
+
+    found = await server.find_company("Berkshire", limit=3)
+    read = await server.get_company(" BRK/B ")
+
+    assert dict(search.calls.last.request.url.params) == {
+        "q": "Berkshire",
+        "limit": "3",
+    }
+    assert found == {"object": "list", "data": []}
+    assert profile.called
+    assert read == {"id": "c-1", "name": "Berkshire"}
 
 
 @respx.mock
@@ -317,6 +430,56 @@ async def test_send_marvin_feedback_posts_the_users_words_and_data():
     # The MCP client's own name, from its initialize request, rides along.
     assert body["structured_data"]["mcp_client"]
     assert result.structured_content == {"id": "fb-1", "status": "received"}
+
+
+@respx.mock
+async def test_get_account_answers_who_and_how_much_is_left_in_one_call():
+    me = {
+        "object": "member",
+        "member": {"id": "m-1", "name": "Ada", "email": "ada@example.com"},
+        "team": {"id": "t-1", "name": "Ada's team", "role": "admin"},
+        "plan": {
+            "name": "Pay as you go",
+            "status": None,
+            "interval": None,
+            "current_period_end": None,
+            "cancel_at_period_end": False,
+        },
+        "credential": {"type": "oauth", "id": "oat_1", "name": None},
+    }
+    auto_recharge = {
+        "enabled": False,
+        "threshold_usd": 5,
+        "amount_usd": 20,
+        "has_saved_card": True,
+        "failures": 3,
+        "last_recharge": None,
+        "disabled_reason": "payment_failures",
+    }
+    wallet = {
+        "object": "wallet",
+        "team_id": "t-1",
+        "balance_usd": 12.5,
+        "grants": [],
+        "next_expiry": None,
+        "auto_recharge": auto_recharge,
+    }
+    respx.get(f"{API}/me").mock(return_value=httpx.Response(200, json=me))
+    respx.get(f"{API}/wallet").mock(return_value=httpx.Response(200, json=wallet))
+
+    async with Client(server.mcp) as client:
+        result = await client.call_tool("get_account", {})
+
+    assert result.structured_content == {
+        "member": me["member"],
+        "team": me["team"],
+        "plan": me["plan"],
+        "credential": me["credential"],
+        "balance_usd": 12.5,
+        "grants": [],
+        "next_expiry": None,
+        "auto_recharge": auto_recharge,
+    }
 
 
 @respx.mock
@@ -353,8 +516,14 @@ async def test_every_tool_declares_a_title_safety_hints_and_an_output_schema():
     hinted = [(t.name, t.annotations) for t in tools if t.annotations is not None]
     writes = {name for name, hint in hinted if not hint.read_only_hint}
     destructive = {name for name, hint in hinted if hint.destructive_hint}
-    assert writes == {"ask_marvin", "cancel_response", "send_marvin_feedback"}
-    assert destructive == {"cancel_response"}
+    assert writes == {
+        "ask_marvin",
+        "cancel_response",
+        "send_marvin_feedback",
+        "start_agent",
+        "cancel_agent_run",
+    }
+    assert destructive == {"cancel_response", "cancel_agent_run"}
     # The research tools answer the API's own response models (output_schemas.json).
     search = next(t.output_schema for t in tools if t.name == "search_documents")
     assert search is not None and search["title"] == "SearchDocumentsResponse"

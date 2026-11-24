@@ -1,14 +1,16 @@
 """The Marvin MCP server.
 
 Talks only to the public API (``/v1/responses``, ``/v1/conversations``,
-``/v1/agent_results``, ``/v1/tools``) with
-the user's own Marvin API key, so it runs anywhere and needs nothing from the
-Marvin codebase.
+``/v1/agents``, ``/v1/agent_results``, ``/v1/companies``, ``/v1/tools``,
+``/v1/me``, ``/v1/wallet``) with the user's own Marvin API key, so it runs
+anywhere and needs nothing from the Marvin codebase.
 
 Besides asking Marvin, it exposes the research tools Marvin's own analysts use
 (``/v1/tools``): a company's documents (list, search, read, explore) and its
 financials (figures, whole statements, the evidence behind a figure). They
-answer in one call each, without a conversation.
+answer in one call each, without a conversation. ``find_company`` and
+``get_company`` (``/v1/companies``) find the company to pass them and read its
+profile.
 
 Marvin's answers often take minutes, longer than an MCP client waits on one
 tool call. So ``ask_marvin`` starts the turn in the background and waits for
@@ -49,6 +51,7 @@ from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from typing import Any, Literal, NotRequired, TypedDict
+from urllib.parse import quote
 
 import httpx
 from fastmcp import Context, FastMCP
@@ -168,14 +171,48 @@ class AgentReport(TypedDict):
     figures: NotRequired[list[Figure]]
 
 
+class AgentArgument(TypedDict):
+    id: str
+    # What kind of value: company, companies, earnings, history_length, date, ...
+    type: str
+    # What value to send.
+    description: str
+    required: bool
+
+
+class Agent(TypedDict):
+    agent: str
+    name: str
+    description: str
+    # premium agents need the Pro plan.
+    category: str
+    # One of your own agents.
+    custom: bool
+    arguments: list[AgentArgument]
+
+
+class AgentCatalog(TypedDict):
+    agents: list[Agent]
+
+
+class AgentRun(TypedDict):
+    agent_result_id: str
+    title: str | None
+    agent: str | None
+    status: AgentStatus
+    companies: list[str]
+    next_step: NotRequired[str]
+
+
 # Tool annotations (MCP ``ToolAnnotations``): Claude runs read-only tools without
 # asking each time and always asks before destructive ones; ChatGPT treats a
 # tool without readOnlyHint as a write that needs confirmation, and its app
 # review wants all three hints set explicitly. Every tool here touches only the
 # user's own Marvin data, so none is open-world.
 READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
-# ask_marvin starts a conversation turn and spends credits: a write, additive
-# rather than destructive, and not idempotent (each call is a new turn).
+# ask_marvin starts a conversation turn and start_agent an agent run; both
+# spend credits: a write, additive rather than destructive, and not idempotent
+# (each ask is a new turn; a stale report is written again).
 WRITE = {
     "readOnlyHint": False,
     "destructiveHint": False,
@@ -200,7 +237,9 @@ mcp = FastMCP(
         "response_id until it is completed. To follow up in the same conversation, pass the "
         "conversation_id from the previous answer. For reports Marvin's research agents have "
         "already written (earnings call summaries and the like), use list_agent_results and "
-        "get_agent_result. An answer or report lists its tables and charts under "
+        "get_agent_result. To have an agent write a new report, find it with list_agents "
+        "and start it with start_agent; a run takes several minutes or more, so read the "
+        "report later with get_agent_result. An answer or report lists its tables and charts under "
         "`figures`: if your client shows MCP Apps, call show_figure for each one you "
         "present, where it belongs in your reply, instead of rewriting it; otherwise "
         "call get_format_guide for how to render the ```financial-table and "
@@ -208,7 +247,11 @@ mcp = FastMCP(
         "(list_documents, search_documents, read_document, explore_document) and the "
         "financials tools (query_financials, get_financial_statements, "
         "get_financial_provenance). Cite figures with the `fd:` document ids they return; "
-        "read_document opens any of them."
+        "read_document opens any of them. Every tool that takes a `company` takes a "
+        "ticker or company id: find_company finds it from a name or another identifier, "
+        "and get_company reads the company's profile and related companies. get_account "
+        "tells you who the user is signed in as, their team's plan and how much credit "
+        "is left: check it before starting costly work when the balance matters."
     ),
 )
 
@@ -646,6 +689,84 @@ async def get_agent_result(agent_result_id: str) -> AgentReport:
     return summary
 
 
+def _run(result: dict[str, Any]) -> AgentRun:
+    run: AgentRun = {
+        "agent_result_id": result["id"],
+        "title": result.get("title"),
+        "agent": result.get("agent"),
+        "status": result["status"],
+        "companies": [
+            co.get("ticker") or co.get("name") for co in result.get("companies", [])
+        ],
+    }
+    if result["status"] in ("pending", "running"):
+        run["next_step"] = (
+            "The agent is writing the report, which takes several minutes or more. "
+            "Read it later with get_agent_result."
+        )
+    elif result["status"] == "completed":
+        run["next_step"] = "Done. Read the report with get_agent_result."
+    return run
+
+
+@mcp.tool(title="List research agents", annotations=READ)
+async def list_agents() -> AgentCatalog:
+    """The research agents you can start with start_agent, and the arguments each takes.
+
+    Includes Marvin's own agents and the custom agents you made in the app.
+    """
+    page = await _request("GET", "/agents")
+    return {
+        "agents": [
+            {
+                "agent": a["id"],
+                "name": a["name"],
+                "description": a["description"],
+                "category": a["category"],
+                "custom": a["custom"],
+                "arguments": [
+                    {
+                        "id": arg["id"],
+                        "type": arg["type"],
+                        "description": arg["description"],
+                        "required": arg["required"],
+                    }
+                    for arg in a["arguments"]
+                ],
+            }
+            for a in page["data"]
+        ]
+    }
+
+
+@mcp.tool(title="Start a research agent", annotations=WRITE)
+async def start_agent(agent: str, arguments: dict[str, Any] | None = None) -> AgentRun:
+    """Start a research agent's run, which writes a report. Returns at once.
+
+    The run is billed to you like one started in the app. If the same run is already
+    going, or its report is current, you get that one instead of a new run.
+
+    Args:
+        agent: The agent's id, from list_agents.
+        arguments: The run's arguments by id, as list_agents describes them, e.g.
+            {"company_id": "AAPL"}. Leave out optional ones for their defaults.
+    """
+    result = await _request(
+        "POST", "/agent_results", json={"agent": agent, "arguments": arguments or {}}
+    )
+    return _run(result)
+
+
+@mcp.tool(title="Cancel a research agent run", annotations=CANCEL)
+async def cancel_agent_run(agent_result_id: str) -> AgentRun:
+    """Stop an agent run you started that is still running.
+
+    Args:
+        agent_result_id: The agent_result_id start_agent returned.
+    """
+    return _run(await _request("POST", f"/agent_results/{agent_result_id}/cancel"))
+
+
 @mcp.tool(title="Table and chart format guide", annotations=READ)
 def get_format_guide() -> str:
     """How to render the ```financial-table and ```echarts blocks in Marvin's answers.
@@ -741,6 +862,45 @@ async def show_figure(
     )
 
 
+# --- Account (/v1/me, /v1/wallet) -----------------------------------------
+
+
+class Account(TypedDict):
+    # ``/v1/me``'s member, team, plan and credential, and ``/v1/wallet``'s
+    # balance, credit and auto-recharge, as the API answers them.
+    member: dict[str, Any]
+    team: dict[str, Any]
+    plan: dict[str, Any]
+    credential: dict[str, Any]
+    balance_usd: float
+    grants: list[dict[str, Any]]
+    next_expiry: int | None
+    auto_recharge: dict[str, Any]
+
+
+@mcp.tool(title="Get your Marvin account", annotations=READ)
+async def get_account() -> Account:
+    """Who you are signed in as, your team and its plan, and the team's balance.
+
+    The balance is in US dollars and is shared by the whole team; it may be negative.
+    `auto_recharge` says whether the team's card is charged when the balance runs low.
+    Topping up and changing auto-recharge are done in the Marvin app by a team admin.
+    """
+    me, wallet = await asyncio.gather(
+        _request("GET", "/me"), _request("GET", "/wallet")
+    )
+    return {
+        "member": me["member"],
+        "team": me["team"],
+        "plan": me["plan"],
+        "credential": me["credential"],
+        "balance_usd": wallet["balance_usd"],
+        "grants": wallet["grants"],
+        "next_expiry": wallet["next_expiry"],
+        "auto_recharge": wallet["auto_recharge"],
+    }
+
+
 # --- Feedback (/v1/feedback) -----------------------------------------------
 
 # Sending feedback writes a new row each time: additive, not idempotent.
@@ -802,6 +962,46 @@ async def send_marvin_feedback(
         json={"kind": kind, "comment": comment, "structured_data": data},
     )
     return {"id": body["id"], "status": "received"}
+
+
+# --- Companies (/v1/companies) ----------------------------------------------
+
+
+@mcp.tool(
+    title="Find a company",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("find_company", ...),
+)
+async def find_company(query: str, limit: int = 10) -> dict[str, Any]:
+    """Find companies by name, ticker or identifier (ISIN, CIK, a ticker on another
+    exchange), best match first.
+
+    Use it when you have a company's name, or a ticker you are not sure Marvin knows.
+    Every other tool takes a result's `id` as `company`.
+
+    Args:
+        query: One company reference, e.g. "Deutsche Telekom", "DTE" or an ISIN.
+        limit: How many matches to return (1-25).
+    """
+    return await _request("GET", "/companies", params={"q": query, "limit": limit})
+
+
+@mcp.tool(
+    title="Get a company's profile",
+    annotations=READ,
+    output_schema=OUTPUT_SCHEMAS.get("get_company", ...),
+)
+async def get_company(company: str) -> dict[str, Any]:
+    """A company's name, sector and industry, and its related companies (competitors,
+    partners, customers, suppliers), most popular first.
+
+    `relationships.total` says how many companies are related in all; the profile
+    lists the first of them.
+
+    Args:
+        company: A ticker (e.g. AAPL) or company id; find_company finds one.
+    """
+    return await _request("GET", f"/companies/{quote(company.strip(), safe='')}")
 
 
 # --- Research tools (/v1/tools) ---------------------------------------------
